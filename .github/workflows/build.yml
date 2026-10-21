@@ -1,0 +1,54 @@
+name: Build
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest
+      - run: python -m pytest -q tests
+
+  windows-exe:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt pytest pyinstaller
+      - run: python -m pytest -q tests
+      - name: Build Portal2VRoid.exe (GUI) and Portal2VRoid-cli.exe
+        shell: cmd
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name Portal2VRoid --add-data "portal2vroid/game_files;portal2vroid/game_files" packaging/entry.py
+          python -m PyInstaller --noconfirm --onefile --console --name Portal2VRoid-cli --add-data "portal2vroid/game_files;portal2vroid/game_files" packaging/entry.py
+      - name: Smoke test the CLI build
+        shell: cmd
+        run: dist\Portal2VRoid-cli.exe --help
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Portal2VRoid-windows
+          path: |
+            dist/Portal2VRoid.exe
+            dist/Portal2VRoid-cli.exe
+      - name: Attach to GitHub release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Portal2VRoid.exe
+            dist/Portal2VRoid-cli.exe
