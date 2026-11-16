@@ -54,10 +54,7 @@ class MDLSkeleton:
         return [make_mat4(quat_to_mat3(b.quat), b.pos) for b in self.bones]
 
     def world_matrices(self) -> list[np.ndarray]:
-        """Rest pose in model ("game") space, computed from pos/quat (forward kinematics).
-
-        Falls back to the stored poseToBone inverse if the result looks broken.
-        """
+        """Default (animation) rest pose in model space: forward kinematics of pos/quat."""
         local = self.local_matrices()
         world: list[np.ndarray] = []
         for i, b in enumerate(self.bones):
@@ -65,14 +62,32 @@ class MDLSkeleton:
                 world.append(world[b.parent] @ local[i])
             else:
                 world.append(local[i])
-        # Sanity check against poseToBone (they should match closely).
-        for i, b in enumerate(self.bones):
+        return world
+
+    def bind_matrices(self) -> list[np.ndarray | None]:
+        """Bind pose the mesh was skinned in (inverse of poseToBone); None if unusable."""
+        out: list[np.ndarray | None] = []
+        for b in self.bones:
             p2b = b.pose_to_bone
             if abs(np.linalg.det(p2b[:3, :3]) - 1.0) < 1e-2:
-                alt = rigid_inverse(p2b)
-                if np.linalg.norm(alt[:3, 3] - world[i][:3, 3]) > 1.0:
-                    world[i] = alt
-        return world
+                out.append(rigid_inverse(p2b))
+            else:
+                out.append(None)
+        return out
+
+    def rest_vs_bind_report(self) -> list[str]:
+        """Where the animation rest pose and the mesh bind pose disagree (debug aid)."""
+        lines = []
+        for b, fk, bind in zip(self.bones, self.world_matrices(), self.bind_matrices()):
+            if bind is None:
+                lines.append(f"{b.name}: no bind matrix")
+                continue
+            dp = float(np.linalg.norm(fk[:3, 3] - bind[:3, 3]))
+            r = fk[:3, :3].T @ bind[:3, :3]
+            ang = float(np.degrees(np.arccos(np.clip((np.trace(r) - 1) / 2, -1, 1))))
+            if dp > 0.05 or ang > 0.5:
+                lines.append(f"{b.name}: rest/bind differ by {dp:.2f} units, {ang:.1f} deg")
+        return lines
 
 
 def _cstr(data: bytes, off: int) -> str:

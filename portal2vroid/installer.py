@@ -457,6 +457,10 @@ class ModManager:
 
         chell, chell_path, chell_verts = self.load_chell()
         log(f"  Chell: {len(chell.bones)} bones, {len(chell.ikchains)} IK chains, includes {chell.include_models or 'none'}")
+        diffs = chell.rest_vs_bind_report()
+        log(f"  Chell rest vs bind pose: {len(diffs)} bone(s) differ")
+        for d in diffs[:40]:
+            log("    " + d)
         result = convert(
             vrm,
             chell,
@@ -478,8 +482,7 @@ class ModManager:
         except Exception:
             self._remove_model_files(model_id)
             raise
-        shutil.rmtree(build_dir, ignore_errors=True)
-        _prune(self._path("_build"))
+        # Keep the generated sources (not packed into the game) for "Export debug files".
 
         av = Avatar(new_id, display, model_id, os.path.abspath(vrm_path), height_scale, time.time())
         avatars.append(av)
@@ -491,6 +494,42 @@ class ModManager:
             self.regenerate()
         log(f"Added avatar '{display}' (id {new_id}).")
         return av
+
+    def export_debug(self, zip_path: str, log_file: str | None = None) -> str:
+        """Zip Chell's model files, the mod settings and the generated model sources."""
+        import zipfile
+
+        fs = GameFS(self.game_root, exclude_dir=self.mod_dir)
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
+            skel_data = fs.read(CHELL_MODEL)
+            wanted = [CHELL_MODEL, CHELL_MODEL[:-4] + ".vvd"]
+            if skel_data:
+                try:
+                    for inc in parse_mdl(skel_data).include_models:
+                        rel = inc.replace("\\", "/").lower()
+                        wanted.append(rel if rel.startswith("models/") else "models/" + rel)
+                except ValueError:
+                    pass
+            for rel in wanted:
+                data = fs.read(rel)
+                if data:
+                    z.writestr("game/" + rel, data)
+            if self.mod_dir:
+                for fn in (SETTINGS_FILE, AVATARS_FILE):
+                    if os.path.isfile(self._path(fn)):
+                        z.write(self._path(fn), fn)
+                build = self._path("_build")
+                for dirpath, _, fns in os.walk(build):
+                    for fn in fns:
+                        full = os.path.join(dirpath, fn)
+                        z.write(full, "build/" + os.path.relpath(full, build).replace("\\", "/"))
+                for rel in ("scripts/vscripts/vroid/vroid_avatars.nut",):
+                    if os.path.isfile(self._path(*rel.split("/"))):
+                        z.write(self._path(*rel.split("/")), "mod/" + rel)
+            if log_file and os.path.isfile(log_file):
+                z.write(log_file, "Portal2VRoid.log")
+        self.log(f"Debug files written to {zip_path}")
+        return zip_path
 
     def remove_avatar(self, avatar_id: int) -> None:
         avatars = self.avatars()
@@ -511,6 +550,7 @@ class ModManager:
                 if fn.split(".", 1)[0] == model_id:
                     os.remove(os.path.join(mdir, fn))
         shutil.rmtree(self._path("materials", "models", "vroid", model_id), ignore_errors=True)
+        shutil.rmtree(self._path("_build", model_id), ignore_errors=True)
 
 
 def _strip_tagged_lines(text: str) -> str:

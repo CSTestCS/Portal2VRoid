@@ -133,6 +133,8 @@ def run_gui(game_arg: str | None = None) -> int:
     btn_check.grid(row=1, column=2, sticky="e", padx=6)
     btn_studiomdl = ttk.Button(f_opt, text="studiomdl.exe...")
     btn_studiomdl.grid(row=2, column=3, sticky="e", pady=(4, 0))
+    btn_debug = ttk.Button(f_opt, text="Export debug files...")
+    btn_debug.grid(row=2, column=2, sticky="e", padx=6, pady=(4, 0))
 
     f_log = ttk.LabelFrame(main, text="Log", padding=6)
     f_log.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
@@ -317,6 +319,19 @@ def run_gui(game_arg: str | None = None) -> int:
             log(f"Using studiomdl: {path}")
 
     btn_studiomdl.configure(command=do_studiomdl)
+
+    def do_debug():
+        m = mgr()
+        if not m:
+            return
+        path = filedialog.asksaveasfilename(
+            title="Save debug files", defaultextension=".zip", initialfile="Portal2VRoid-debug.zip",
+            filetypes=[("Zip archive", "*.zip")],
+        )
+        if path:
+            run_bg(lambda: m.export_debug(path, log_path), "Debug zip saved. Send it to the developer.")
+
+    btn_debug.configure(command=do_debug)
     game_var.trace_add("write", lambda *_: refresh())
 
     def pump():

@@ -109,7 +109,13 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     nut = open(os.path.join(mod, "scripts/vscripts/vroid/vroid_avatars.nut")).read()
     assert 'model = "models/vroid/a1_test_avatar.mdl", short = "vroid/a1_test_avatar"' in nut
     assert re.search(r"::VRoidDefaults <- \{ avatar = 1,", nut)  # first avatar becomes the default
-    assert not os.path.exists(os.path.join(mod, "_build"))
+    assert os.path.isfile(os.path.join(mod, "_build", "a1_test_avatar", "a1_test_avatar.qc"))  # kept for debugging
+    import zipfile
+
+    zp = m.export_debug(str(tmp_path / "debug.zip"))
+    names = zipfile.ZipFile(zp).namelist()
+    assert "game/models/player/chell/player.mdl" in names and "game/models/player/chell/anims.mdl" not in names
+    assert "build/a1_test_avatar/a1_test_avatar.qc" in names and "vroid_settings.json" in names
 
     v = VPK(os.path.join(mod, "pak01_dir.vpk"))
     assert "scripts/vscripts/vroid/vroid_avatars.nut" in v
@@ -167,8 +173,6 @@ def test_portal2_chell_with_animation_include(tmp_path, monkeypatch):
     vrm_path = tmp_path / "miku.vrm"
     vrm_path.write_bytes(fixtures.make_vrm("1.0"))
     av = m.add_avatar(str(vrm_path))
-    qc_dir = os.path.join(m.mod_dir, "_build")
-    assert not os.path.exists(qc_dir)  # cleaned up after success
     assert any("IK chains from models/player/chell/player_animations.mdl: lfoot, rfoot, lhand, rhand" in ln for ln in logs)
     assert av.id == 1
 
