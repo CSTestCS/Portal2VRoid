@@ -188,3 +188,13 @@ def test_vrm_load(version):
     allp = np.concatenate([p.positions for p in vrm.primitives])
     assert 1.3 < allp[:, 1].max() < 1.5
     assert abs(allp[:, 1].min()) < 0.05
+
+
+def test_block_conditions_stay_on_their_block():
+    text = '"R"\n{\n\t"BtnA"\n\t{\n\t\t"xpos" "1"\n\t}\n\t"BtnX360" [$X360]\n\t{\n\t\t"xpos" "2"\n\t}\n\t"BtnB"\n\t{\n\t\t"ypos" "5" [$WIN32]\n\t}\n}\n'
+    top = kv.parse(text).blocks()[0]
+    assert top.find("BtnA").cond == ""
+    assert top.find("BtnX360").cond == "[$X360]"
+    assert top.find("BtnB").find("ypos").cond == "[$WIN32]"
+    again = kv.parse(kv.dump(kv.parse(text))).blocks()[0]
+    assert again.find("BtnX360").cond == "[$X360]" and again.find("BtnA").cond == ""

@@ -630,6 +630,16 @@ class ModManager:
                 for rel in ("scripts/vscripts/vroid/vroid_avatars.nut",):
                     if os.path.isfile(self._path(*rel.split("/"))):
                         z.write(self._path(*rel.split("/")), "mod/" + rel)
+            for rel in fs.list(lambda p: "ingamemainmenu" in p or p.endswith("optionsflyout.res"), prefix="resource/ui"):
+                data = fs.read(rel)
+                if data:
+                    z.writestr("game/" + rel, data)
+            if self.mod_dir:
+                res_dir = self._path("resource")
+                for dirpath, _, fns in os.walk(res_dir):
+                    for fn in fns:
+                        full = os.path.join(dirpath, fn)
+                        z.write(full, "mod/" + os.path.relpath(full, self.mod_dir).replace("\\", "/"))
             if log_file and os.path.isfile(log_file):
                 z.write(log_file, "Portal2VRoid.log")
         self.log(f"Debug files written to {zip_path}")

@@ -93,14 +93,18 @@ def parse(text: str) -> KV:
     root = KV("", None, [])
     stack = [root]
     pending_key: str | None = None
+    pending_cond = ""
     last: KV | None = None
     for tok, kind in _tokenize(text):
         if kind == "cond":
-            if last is not None:
-                last.cond = tok
+            if pending_key is not None:
+                pending_cond = tok  # `"Key" [$X360] { ... }`: belongs to the block being opened
+            elif last is not None:
+                last.cond = tok  # `"key" "value" [$WIN32]`
             continue
         if tok == "{" and kind is False:
-            node = KV(pending_key or "", None, [])
+            node = KV(pending_key or "", None, [], pending_cond)
+            pending_cond = ""
             stack[-1].children.append(node)
             stack.append(node)
             pending_key = None

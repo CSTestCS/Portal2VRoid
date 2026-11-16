@@ -324,7 +324,9 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
     used = set()
     for prim in vrm.primitives:
         used.update(np.unique(prim.joints[prim.weights > 1e-4]).tolist())
-    needed = (used | set(vrm.spring_joints)) - set(chell_of_node)
+    # Only bones that move vertices (and their ancestors) are kept: spring bones with
+    # nothing attached would just use up Source's 128-bone budget.
+    needed = used - set(chell_of_node)
     extra_set = set()
     for n in needed:
         k = n
