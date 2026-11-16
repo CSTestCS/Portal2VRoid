@@ -86,25 +86,10 @@ if (!("VRoidDefaults" in getroottable()))
 	return v.avatar + "," + v.tp + "," + v.dist + "," + v.up + "," + v.right;
 }
 
+// Messages go to the console only. (An on-screen game_text entity created from
+// script ends up in save games without being properly spawned.)
 ::VRoid_Notify <- function(msg) {
 	VRoid_Log(msg);
-	local t = Entities.FindByName(null, "vroid_text");
-	if (t == null) {
-		t = Entities.CreateByClassname("game_text");
-		if (t == null) return;
-		t.__KeyValueFromString("targetname", "vroid_text");
-		t.__KeyValueFromString("spawnflags", "1");
-		t.__KeyValueFromString("x", "-1");
-		t.__KeyValueFromString("y", "0.82");
-		t.__KeyValueFromString("channel", "3");
-		t.__KeyValueFromString("effect", "0");
-		t.__KeyValueFromString("color", "255 220 140");
-		t.__KeyValueFromString("fadein", "0.05");
-		t.__KeyValueFromString("fadeout", "0.5");
-		t.__KeyValueFromString("holdtime", "2.5");
-	}
-	t.__KeyValueFromString("message", msg);
-	EntFireByHandle(t, "Display", "", 0.0, null, null);
 }
 
 // Remember the current state for the rest of this game session (survives map loads).
@@ -355,9 +340,7 @@ if (!("VRoidDefaults" in getroottable()))
 	VRoid_Process(p);
 }
 
-// Update loop. Two independent drivers (a self-rescheduling worldspawn input and
-// a logic_timer) so the loop runs even if one of them is unavailable; ticks closer
-// than 0.08 s apart are skipped, so having both is harmless.
+// Update loop, driven by VRoid_ChainTick re-scheduling itself every 0.1 s.
 ::VRoid_SafeTick <- function() {
 	local v = ::VRoid;
 	local now = Time();
@@ -379,19 +362,23 @@ if (!("VRoidDefaults" in getroottable()))
 	if (w != null) EntFireByHandle(w, "RunScriptCode", "VRoid_ChainTick(" + id + ")", 0.1, null, null);
 }
 
+// The loop only uses a delayed input on worldspawn (a map entity that always exists);
+// the mod creates no entities of its own that could end up in save games.
 ::VRoid_StartTimer <- function() {
 	::VRoid.tickId = RandomInt(1, 1000000000);
 	local w = Entities.FindByClassname(null, "worldspawn");
-	if (w != null) EntFireByHandle(w, "RunScriptCode", "VRoid_ChainTick(" + ::VRoid.tickId + ")", 0.1, null, null);
-	else VRoid_Log("worldspawn not found; using the timer only");
+	if (w == null) { VRoid_Log("worldspawn not found; mod inactive on this map"); return; }
+	EntFireByHandle(w, "RunScriptCode", "VRoid_ChainTick(" + ::VRoid.tickId + ")", 0.1, null, null);
+}
 
-	if (Entities.FindByName(null, "vroid_timer") != null) return;
-	local t = Entities.CreateByClassname("logic_timer");
-	if (t == null) { VRoid_Log("could not create timer"); return; }
-	t.__KeyValueFromString("targetname", "vroid_timer");
-	EntFireByHandle(t, "AddOutput", "RefireTime 0.1", 0.0, null, null);
-	EntFireByHandle(t, "AddOutput", "OnTimer vroid_timer:RunScriptCode:VRoid_SafeTick():0:-1", 0.0, null, null);
-	EntFireByHandle(t, "Enable", "", 0.2, null, null);
+// Earlier versions created these helper entities; remove any that a save game restored.
+foreach (leftover in ["vroid_timer", "vroid_text"]) {
+	local e = null;
+	for (local n = 0; n < 8; n++) {
+		e = Entities.FindByName(null, leftover);
+		if (e == null) break;
+		e.Destroy();
+	}
 }
 
 // Single player only: co-op uses the robot models and blocks third person.
