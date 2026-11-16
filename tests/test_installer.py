@@ -69,7 +69,7 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "compile_model", fake_compile)
     m = ModManager(str(game), log=lambda *_: None)
     mod = m.install()
-    assert os.path.basename(mod) == "portal2_dlc3"
+    assert os.path.basename(mod) == "portal2_vroid"
     assert find_mod_dir(str(game)) == mod
 
     mapspawn = open(os.path.join(mod, "scripts/vscripts/mapspawn.nut")).read()
@@ -86,8 +86,8 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     assert 'bind "v" "vroid_tp_toggle"' in binds
 
     gi = (game / "portal2" / "gameinfo.txt").read_text()
-    assert "\t\t\tGame\t\t\t\t|gameinfo_path|../portal2_dlc3 // Portal2VRoid\n" in gi
-    assert gi.index("portal2_dlc3") < gi.index("|gameinfo_path|.\n")  # first search path
+    assert "\t\t\tGame\t\t\t\t|gameinfo_path|../portal2_vroid // Portal2VRoid\n" in gi
+    assert gi.index("portal2_vroid") < gi.index("|gameinfo_path|.\n")  # first search path
     assert (game / "portal2" / "gameinfo.txt.vroid_backup").read_text() == GAMEINFO
     assert "exec vroid/vroid_boot" in (game / "portal2" / "cfg" / "autoexec.cfg").read_text()
     assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "studiomdl" not in ln]
@@ -120,7 +120,8 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     v = VPK(os.path.join(mod, "pak01_dir.vpk"))
     assert "scripts/vscripts/vroid/vroid_avatars.nut" in v
     assert "scripts/vscripts/mapspawn.nut" in v and "resource/ui/basemodui/ingamemainmenu.res" in v
-    assert "models/vroid/a1_test_avatar.mdl" in v and "materials/models/vroid/a1_test_avatar/body_skin.vmt" in v
+    assert "models/vroid/a1_test_avatar.mdl" not in v  # big files stay loose
+    assert os.path.isfile(os.path.join(mod, "models/vroid/a1_test_avatar.mdl"))
     assert "vroid_settings.json" not in v
     assert v.read("scripts/vscripts/vroid/vroid_avatars.nut").decode() == nut
 
@@ -139,13 +140,29 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     assert find_mod_dir(str(game)) is None
 
 
-def test_uninstall_keeps_numbering(game, monkeypatch):
+def test_migrates_old_dlc_install(game, monkeypatch):
+    """Older versions installed into portal2_dlc3 (mounted twice: as DLC and via gameinfo)."""
+    old = game / "portal2_dlc3"
+    (old / "models" / "vroid").mkdir(parents=True)
+    (old / "vroid_mod.txt").write_text("old")
+    (old / "models" / "vroid" / "a1_miku.mdl").write_bytes(b"IDST")
+    (old / "vroid_avatars.json").write_text('[{"id": 1, "name": "Miku", "model_id": "a1_miku", "source": "x"}]')
+    (game / "portal2_dlc4").mkdir()  # someone else's DLC folder after ours
+    gi = game / "portal2" / "gameinfo.txt"
+    gi.write_text(gi.read_text().replace("SearchPaths\n\t\t{\n", "SearchPaths\n\t\t{\n\t\t\tGame\t|gameinfo_path|../portal2_dlc3 // Portal2VRoid\n"))
+
     m = ModManager(str(game), log=lambda *_: None)
+    assert os.path.basename(m.mod_dir) == "portal2_dlc3"
     mod = m.install()
-    later = game / "portal2_dlc4"
-    later.mkdir()
+    assert os.path.basename(mod) == "portal2_vroid"
+    assert os.path.isfile(game / "portal2_vroid" / "models" / "vroid" / "a1_miku.mdl")
+    assert [a.name for a in m.avatars()] == ["Miku"]
+    assert os.listdir(old) == ["placeholder.txt"]  # keeps portal2_dlc4 mounting
+    text = gi.read_text()
+    assert "portal2_dlc3" not in text and text.count("Portal2VRoid") == 1 and "../portal2_vroid" in text
+    assert find_mod_dir(str(game)) == mod
     m.uninstall()
-    assert os.path.isdir(mod) and os.listdir(mod) == ["placeholder.txt"]
+    assert not (game / "portal2_vroid").exists() and gi.read_text() == GAMEINFO
 
 
 def test_compile_requires_studiomdl(game, tmp_path):

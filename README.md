@@ -12,7 +12,7 @@ Play Portal 2 as your own **VRoid / VRM avatar** instead of Chell, with a
 * Key binding for third person (default **V**), also listed under *Options → Keyboard*.
 * Hair, skirts and other VRM "spring bones" swing via Source jigglebones. A cel-shading
   light ramp gives the avatar an anime look.
-* One `.exe`. It finds Portal 2 through Steam, installs into a `portal2_dlcN` folder, and never
+* One `.exe`. It finds Portal 2 through Steam, installs into its own `portal2_vroid` folder, and never
   modifies Valve's files.
 
 ## Install
@@ -25,7 +25,7 @@ Play Portal 2 as your own **VRoid / VRM avatar** instead of Chell, with a
    The first avatar you add becomes the startup avatar.
 5. Start Portal 2 and load any single-player chapter or save.
 
-To uninstall, click **Uninstall** in the app (or delete the `portal2_dlcN` folder that holds
+To uninstall, click **Uninstall** in the app (or delete the `portal2_vroid` folder that holds
 `vroid_mod.txt`).
 
 ## In game
@@ -81,7 +81,7 @@ Click **Save settings**, then restart Portal 2.
    If `vroid_status` is an unknown command, the mod folder isn't being loaded (see step 1).
    `exec vroid` starts the mod by hand on the current map.
 4. The app keeps a full log at `%LOCALAPPDATA%\Portal2VRoid\Portal2VRoid.log`. If a
-   conversion fails, studiomdl's output is in `portal2_dlcN\_build\<avatar>\studiomdl.log`.
+   conversion fails, studiomdl's output is in `portal2_vroid\_build\<avatar>\studiomdl.log`.
 
 The installer changes two of Portal 2's own files, and **Uninstall** puts both back:
 `portal2/gameinfo.txt` (one search-path line, backup kept as `gameinfo.txt.vroid_backup`) and
@@ -90,7 +90,7 @@ The installer changes two of Portal 2's own files, and **Uninstall** puts both b
 ## How it works
 
 ```
-your.vrm ──► Portal2VRoid.exe ──► portal2_dlcN/
+your.vrm ──► Portal2VRoid.exe ──► portal2_vroid/
                │  read Chell's skeleton from the game's VPK
                │  place + scale avatar, repose T-pose → Chell's rest pose
                │  build skeleton: Chell's bone names & orientations, avatar's joint positions

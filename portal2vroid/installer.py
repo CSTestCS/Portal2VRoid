@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 
 from . import __version__
 from .compiler import compile_model
-from .gamefs import MOD_MARKER, GameFS, dlc_dirs, find_mod_dir, next_free_dlc_dir
+from .gamefs import MOD_FOLDER, MOD_MARKER, GameFS, dlc_dirs, find_mod_dir
 from .materials import write_materials
 from .mdl import parse_mdl, vvd_positions
 from .menu_patch import FLYOUT_RES, build_flyout, patch_ingame_menu, patch_kb_act
@@ -131,8 +131,20 @@ class ModManager:
     # -------------------------------------------------------------- install
     def install(self) -> str:
         """Create or repair the mod folder. Returns its path."""
+        target = os.path.join(self.game_root, MOD_FOLDER)
+        if self.mod_dir is not None and os.path.normcase(os.path.abspath(self.mod_dir)) != os.path.normcase(target):
+            # Older versions used a portal2_dlcN folder, which Portal 2 also mounts as DLC
+            # (so it was loaded twice). Move it to its own folder.
+            old = self.mod_dir
+            self._unhook()
+            if os.path.exists(target):
+                shutil.rmtree(target)
+            shutil.copytree(old, target)
+            self._remove_mod_folder(old)
+            self.log(f"Moved the mod from {os.path.basename(old)} to {MOD_FOLDER}.")
+            self.mod_dir = target
         if self.mod_dir is None:
-            self.mod_dir = next_free_dlc_dir(self.game_root)
+            self.mod_dir = target
             os.makedirs(self.mod_dir, exist_ok=True)
             self.log(f"Creating mod folder {self.mod_dir}")
         else:
@@ -367,18 +379,18 @@ class ModManager:
         self._pack_vpk()
 
     def _pack_vpk(self) -> None:
-        """Pack every game file into pak01_dir.vpk.
+        """Pack the small override files (scripts, cfg, menus) into pak01_dir.vpk.
 
         Portal 2 searches VPK archives before loose folders, so loose overrides
         (mapspawn.nut, the pause menu, kb_act.lst) would be hidden by Valve's VPK.
-        Our own VPK in a higher-priority folder wins.
+        Models and textures have unique names and stay loose.
         """
         files = {}
         skip = {MOD_MARKER, SETTINGS_FILE, AVATARS_FILE, "pak01_dir.vpk", "placeholder.txt"}
         for dirpath, dirnames, fns in os.walk(self.mod_dir):
             dirnames[:] = [d for d in dirnames if not d.startswith("_")]
             for fn in fns:
-                if fn in skip:
+                if fn in skip or not fn.lower().endswith((".nut", ".cfg", ".res", ".lst")):
                     continue
                 full = os.path.join(dirpath, fn)
                 rel = os.path.relpath(full, self.mod_dir).replace("\\", "/")
@@ -394,17 +406,9 @@ class ModManager:
         mod_dir = self.mod_dir
         if not os.path.isfile(os.path.join(mod_dir, MOD_MARKER)):
             raise RuntimeError(f"{mod_dir} is not a Portal2VRoid folder; refusing to delete it.")
-        dlcs = [os.path.normcase(os.path.abspath(d)) for d in dlc_dirs(self.game_root)]
-        here = os.path.normcase(os.path.abspath(mod_dir))
-        is_last = bool(dlcs) and dlcs[-1] == here
         self._unhook()
         self._remove_saved_cfg()
-        shutil.rmtree(mod_dir)
-        if not is_last:
-            # Later portal2_dlcN folders only mount if the numbering has no gaps.
-            os.makedirs(mod_dir, exist_ok=True)
-            with open(os.path.join(mod_dir, "placeholder.txt"), "w", encoding="utf-8") as f:
-                f.write("Left empty on purpose so the next portal2_dlc folders keep loading.\n")
+        self._remove_mod_folder(mod_dir)
         for cfg in (
             os.path.join(self.game_root, "portal2", "cfg", SAVED_CFG),
             os.path.join(self.game_root, "update", "cfg", SAVED_CFG),
@@ -413,6 +417,16 @@ class ModManager:
                 os.remove(cfg)
         self.mod_dir = None
         self.log("Uninstalled.")
+
+    def _remove_mod_folder(self, path: str) -> None:
+        dlcs = [os.path.normcase(os.path.abspath(d)) for d in dlc_dirs(self.game_root)]
+        here = os.path.normcase(os.path.abspath(path))
+        shutil.rmtree(path)
+        if here in dlcs and dlcs[-1] != here:
+            # Later portal2_dlcN folders only mount if the numbering has no gaps.
+            os.makedirs(path, exist_ok=True)
+            with open(os.path.join(path, "placeholder.txt"), "w", encoding="utf-8") as f:
+                f.write("Left empty on purpose so the next portal2_dlc folders keep loading.\n")
 
     # -------------------------------------------------------------- avatars
     def load_chell(self, fs: GameFS | None = None):

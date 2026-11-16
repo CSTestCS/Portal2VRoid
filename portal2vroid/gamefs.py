@@ -10,6 +10,7 @@ from .vpk import VPK
 
 PORTAL2_APPID = "620"
 MOD_MARKER = "vroid_mod.txt"
+MOD_FOLDER = "portal2_vroid"  # loaded through a gameinfo.txt search path, not as DLC
 
 
 def _steam_roots() -> list[str]:
@@ -93,6 +94,10 @@ def dlc_dirs(game_root: str) -> list[str]:
 
 
 def find_mod_dir(game_root: str) -> str | None:
+    """The mod folder: portal2_vroid, or a portal2_dlcN folder from older versions."""
+    own = os.path.join(game_root, MOD_FOLDER)
+    if os.path.isfile(os.path.join(own, MOD_MARKER)):
+        return own
     for d in dlc_dirs(game_root):
         if os.path.isfile(os.path.join(d, MOD_MARKER)):
             return d
