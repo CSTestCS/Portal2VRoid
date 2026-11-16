@@ -280,3 +280,18 @@ def test_install_cleans_up_old_saved_cfg(game):
     assert 'con_logfile ""' in boot
     nut = open(os.path.join(m.mod_dir, "scripts", "vscripts", "vroid", "vroid_main.nut")).read()
     assert "con_logfile" not in nut and "exec vroid_saved" not in nut
+
+
+def test_menu_and_keyboard_patches_can_be_switched_off(game):
+    m = ModManager(str(game), log=lambda *_: None)
+    mod = m.install()
+    assert "resource/ui/basemodui/ingamemainmenu.res" in VPK(os.path.join(mod, "pak01_dir.vpk"))
+    s = m.load_settings()
+    s.patch_pause_menu = False
+    s.patch_keyboard_list = False
+    m.save_settings(s)
+    m.install()
+    v = VPK(os.path.join(mod, "pak01_dir.vpk"))
+    assert not [p for p in v.entries if p.startswith("resource/") or p.endswith("kb_act.lst")]
+    assert not os.path.exists(os.path.join(mod, "resource")) and not os.path.exists(os.path.join(mod, "scripts", "kb_act.lst"))
+    assert "scripts/vscripts/mapspawn.nut" in v  # the mod itself still loads

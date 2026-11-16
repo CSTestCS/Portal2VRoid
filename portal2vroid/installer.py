@@ -66,6 +66,8 @@ class Settings:
     toon_shading: bool = True
     jiggle_bones: bool = True
     studiomdl_path: str = ""
+    patch_pause_menu: bool = True
+    patch_keyboard_list: bool = True
 
 
 @dataclass
@@ -169,10 +171,19 @@ class ModManager:
         )
         self._write_text("scripts/vscripts/mapspawn.nut", text)
 
-        self._patch_menus(fs)
+        settings = self.load_settings()
+        self._remove_menu_files()
+        if settings.patch_pause_menu:
+            self._patch_menus(fs)
+        else:
+            self.log("Pause-menu entry is switched off (use the keys / console commands).")
 
-        kb = fs.read("scripts/kb_act.lst")
-        if kb:
+        kb = fs.read("scripts/kb_act.lst") if settings.patch_keyboard_list else None
+        if not settings.patch_keyboard_list:
+            self.log("Options > Keyboard list entry is switched off.")
+            if os.path.isfile(self._path("scripts", "kb_act.lst")):
+                os.remove(self._path("scripts", "kb_act.lst"))
+        elif kb:
             enc = "utf-16" if kb[:2] in (b"\xff\xfe", b"\xfe\xff") else "utf-8"
             try:
                 patched = patch_kb_act(kb.decode(enc, errors="replace").lstrip("﻿"))
@@ -339,6 +350,13 @@ class ModManager:
         check(have, "studiomdl.exe found (needed to convert avatars)" + ("" if have else
               " - install 'Portal 2 Authoring Tools - Beta' from Steam Library > Tools"))
         return out
+
+    def _remove_menu_files(self) -> None:
+        d = self._path("resource", "ui", "basemodui")
+        if os.path.isdir(d):
+            shutil.rmtree(d)
+        _prune(self._path("resource", "ui"))
+        _prune(self._path("resource"))
 
     def _patch_menus(self, fs: GameFS) -> None:
         menus = fs.list(lambda p: "ingamemainmenu" in p and p.endswith(".res"), prefix="resource/ui")

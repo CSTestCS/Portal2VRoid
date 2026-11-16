@@ -120,11 +120,14 @@ def run_gui(game_arg: str | None = None) -> int:
     f_opt = ttk.LabelFrame(main, text="Options", padding=6)
     f_opt.grid(row=4, column=0, sticky="ew")
     toon_var, jig_var, cheat_var, binds_var = tk.BooleanVar(), tk.BooleanVar(), tk.BooleanVar(), tk.BooleanVar()
+    menu_var, kb_var = tk.BooleanVar(), tk.BooleanVar()
     tex_var = tk.IntVar()
     ttk.Checkbutton(f_opt, text="Anime (toon) shading", variable=toon_var).grid(row=0, column=0, sticky="w")
     ttk.Checkbutton(f_opt, text="Hair/clothes physics (jigglebones)", variable=jig_var).grid(row=0, column=1, sticky="w")
     ttk.Checkbutton(f_opt, text="Turn sv_cheats off when not needed", variable=cheat_var).grid(row=1, column=0, sticky="w")
     ttk.Checkbutton(f_opt, text="Apply key bindings at game start", variable=binds_var).grid(row=1, column=1, sticky="w")
+    ttk.Checkbutton(f_opt, text="Add entry to the pause menu", variable=menu_var).grid(row=2, column=0, sticky="w")
+    ttk.Checkbutton(f_opt, text="List actions in Options > Keyboard", variable=kb_var).grid(row=2, column=1, sticky="w")
     ttk.Label(f_opt, text="Max texture size").grid(row=0, column=2, sticky="e", padx=6)
     ttk.Combobox(f_opt, textvariable=tex_var, values=(512, 1024, 2048, 4096), width=6, state="readonly").grid(row=0, column=3)
     btn_save = ttk.Button(f_opt, text="Save settings")
@@ -165,6 +168,8 @@ def run_gui(game_arg: str | None = None) -> int:
         jig_var.set(bool(s.jiggle_bones))
         cheat_var.set(bool(s.manage_cheats))
         binds_var.set(bool(s.apply_binds))
+        menu_var.set(bool(s.patch_pause_menu))
+        kb_var.set(bool(s.patch_keyboard_list))
         tex_var.set(int(s.max_texture))
 
     def ui_settings(m: ModManager) -> Settings:
@@ -174,6 +179,7 @@ def run_gui(game_arg: str | None = None) -> int:
         s.binds = {a: v.get().strip().lower() for a, v in key_vars.items()}
         s.toon_shading, s.jiggle_bones = toon_var.get(), jig_var.get()
         s.manage_cheats, s.apply_binds = cheat_var.get(), binds_var.get()
+        s.patch_pause_menu, s.patch_keyboard_list = menu_var.get(), kb_var.get()
         s.max_texture = int(tex_var.get())
         return s
 
@@ -280,7 +286,8 @@ def run_gui(game_arg: str | None = None) -> int:
         m = mgr()
         if m:
             m.save_settings(ui_settings(m))
-            log("Settings saved. They apply the next time you start Portal 2.")
+            # re-apply so the pause-menu / keyboard-list switches take effect
+            run_bg(m.install, "Settings saved. They apply the next time you start Portal 2.")
 
     btn_install.configure(command=do_install)
     btn_uninstall.configure(command=do_uninstall)
