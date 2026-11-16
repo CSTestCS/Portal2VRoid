@@ -39,7 +39,6 @@ To uninstall, click **Uninstall** in the app (or delete the `portal2_dlcN` folde
 | Camera height | – | Camera Height + / − | `vroid_cam_up_more`, `vroid_cam_up_less` |
 | Camera horizontal position | – | Camera Right / Camera Left | `vroid_cam_right_more`, `vroid_cam_right_less` |
 | Reset camera | – | Reset Camera | `vroid_cam_reset` |
-| Keep current settings for next launch | – | Save as Default | `vroid_save` |
 | Status / installed avatars | – | – | `vroid_status` |
 
 Changes made from the pause menu take effect when you resume the game. All actions can be bound

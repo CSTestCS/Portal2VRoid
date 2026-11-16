@@ -239,3 +239,18 @@ def test_real_compile_path_creates_output_folder(game, tmp_path):
     # nothing left behind in Valve's folder
     assert not os.path.exists(game / "portal2" / "models" / "vroid")
     assert not os.path.exists(game / "portal2" / "materials" / "models" / "vroid")
+
+
+def test_install_cleans_up_old_saved_cfg(game):
+    cfg = game / "portal2" / "cfg"
+    cfg.mkdir(parents=True, exist_ok=True)
+    (cfg / "vroid_saved.cfg").write_text("Unknown command\n" * 1000)
+    (cfg / "config.cfg").write_text('bind "w" "+forward"\ncon_logfile "cfg/vroid_saved.cfg"\nsensitivity "3"\n')
+    m = ModManager(str(game), log=lambda *_: None)
+    m.install()
+    assert not (cfg / "vroid_saved.cfg").exists()
+    assert (cfg / "config.cfg").read_text() == 'bind "w" "+forward"\nsensitivity "3"\n'
+    boot = open(os.path.join(m.mod_dir, "cfg", "vroid", "vroid_boot.cfg")).read()
+    assert 'con_logfile ""' in boot
+    nut = open(os.path.join(m.mod_dir, "scripts", "vscripts", "vroid", "vroid_main.nut")).read()
+    assert "con_logfile" not in nut and "exec vroid_saved" not in nut

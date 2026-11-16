@@ -4,8 +4,7 @@
 //
 // Console commands (aliases from cfg/vroid/vroid_aliases.cfg) call the
 // VRoid_* functions below. State survives map changes through the
-// "vroid_session_restore" alias, and across game restarts through
-// cfg/vroid_saved.cfg (written with con_logfile by "Save as default").
+// "vroid_session_restore" alias. Startup defaults come from the Portal2VRoid app.
 //=============================================================================
 
 if ("VRoid_Loaded" in getroottable()) return;
@@ -35,6 +34,7 @@ if (!("VRoidDefaults" in getroottable()))
 	failed = {},
 	pcStage = 0,
 	pcTries = 0,
+	setTries = 0,
 
 	tpApplied = -1,
 	camDirty = true,
@@ -135,6 +135,7 @@ if (!("VRoidDefaults" in getroottable()))
 	v.avatar = id;
 	v.pcStage = 0;
 	v.pcTries = 0;
+	v.setTries = 0;
 	if (id in v.failed) delete v.failed[id];
 	VRoid_SaveSession();
 	VRoid_Notify("Avatar: " + VRoid_AvatarName(id));
@@ -185,12 +186,10 @@ if (!("VRoidDefaults" in getroottable()))
 	VRoid_Notify("Camera reset");
 }
 
-// Write the current state to cfg/vroid_saved.cfg so it is the default next launch.
+// Defaults for the next launch are set in the Portal2VRoid app (the game cannot
+// safely write files). This only explains that.
 ::VRoid_SavePersistent <- function() {
-	VRoid_Cmd("con_logfile cfg/vroid_saved.cfg");
-	VRoid_Cmd("echo script VRoid_Restore(" + VRoid_StateArgs() + ")");
-	VRoid_Cmd("con_logfile \"\"");
-	VRoid_Notify("VRoid settings saved as default");
+	VRoid_Notify("Set startup defaults in the Portal2VRoid app (Save settings)");
 }
 
 ::VRoid_Disable <- function() {
@@ -258,7 +257,9 @@ if (!("VRoidDefaults" in getroottable()))
 	// stage 2: did a prop with this model appear?
 	local found = [];
 	local e = null;
-	while ((e = Entities.FindByModel(e, model)) != null) {
+	for (local n = 0; n < 32; n++) { // bounded: never loop forever
+		e = Entities.FindByModel(e, model);
+		if (e == null) break;
 		if (e.GetClassname() == "prop_dynamic") found.append(e);
 	}
 	if (found.len() > 0) {
@@ -290,6 +291,11 @@ if (!("VRoidDefaults" in getroottable()))
 	local cur = p.GetModelName();
 	if (cur.tolower() != want.tolower()) {
 		if (v.avatar == 0 || (want in v.precached)) {
+			v.setTries++;
+			if (v.setTries > 5) {
+				if (v.setTries == 6) VRoid_Notify("VRoid: the game would not switch the player model; giving up on this map.");
+				return;
+			}
 			VRoid_SetPlayerModel(p, want);
 			if (v.tp == 0 && v.cheatsByUs) VRoid_Cheats(false);
 		} else {
@@ -300,6 +306,7 @@ if (!("VRoidDefaults" in getroottable()))
 		}
 	} else {
 		v.precached[want] <- true;
+		v.setTries = 0;
 	}
 
 	// 2) camera
@@ -337,10 +344,8 @@ if (!("VRoidDefaults" in getroottable()))
 		if (!v.restored && Time() - v.bootTime < 0.6) return;
 		v.initialized = true;
 		if (!v.restored) {
-			// First map since the game started: apply installer defaults and
-			// anything saved in-game with "Save as default".
+			// First map since the game started: installer defaults apply.
 			v.restored = true;
-			VRoid_Cmd("exec vroid_saved");
 			VRoid_SaveSession();
 		}
 		VRoid_Log("active: avatar=" + VRoid_AvatarName(v.avatar) + ", third person=" + (v.tp ? "on" : "off"));

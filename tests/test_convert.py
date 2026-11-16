@@ -150,7 +150,7 @@ def test_smd_qc_output(tmp_path):
     qtext = open(qc).read()
     assert '$includemodel "player/chell/player.mdl"' in qtext
     assert '$sequence "vroid_proportions" "a_vroid_proportions" predelta autoplay' in qtext
-    assert '$ikchain "lfoot" "ValveBiped.Bip01_L_Foot" knee 0.700000 0.700000 0.000000' in qtext
+    assert '$ikchain "lfoot" "ValveBiped.Bip01_L_Foot"\n' in qtext and " knee " not in qtext
     assert '$jigglebone "vrm_J_Hair1"' in qtext
 
     bodies = re.findall(r'\$body "[^"]+" "([^"]+)"', qtext)
@@ -212,3 +212,14 @@ def test_bad_vvd_height_falls_back_to_skeleton():
     assert any("looked wrong" in w for w in res.warnings)
     allp = np.concatenate([mm.positions for mm in res.meshes])
     assert 65 < allp[:, 2].max() < 80
+
+
+def test_no_bbox_when_chell_has_none(tmp_path):
+    import struct
+
+    data = bytearray(fixtures.make_chell_mdl("portal2", "y"))
+    struct.pack_into("<6f", data, 104, 0, 0, 0, 0, 0, 0)  # Portal 2's Chell has a zero hull
+    chell = parse_mdl(bytes(data))
+    res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions())
+    qc = open(write_model_sources(str(tmp_path), "t", res, chell, ["a", "b"])).read()
+    assert "$bbox" not in qc and "$cbox" not in qc

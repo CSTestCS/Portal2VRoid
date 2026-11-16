@@ -183,6 +183,7 @@ class ModManager:
             self.regenerate()
         self._hook_gameinfo()
         self._hook_autoexec()
+        self._remove_saved_cfg()
         for line in self.diagnose():
             self.log("  " + line)
         self.log("Install complete. Restart Portal 2 if it is running.")
@@ -229,6 +230,28 @@ class ModManager:
         text += f"exec vroid/vroid_boot {HOOK_TAG}\n"
         with open(path, "w", encoding="utf-8", newline="") as f:
             f.write(text)
+
+    def _remove_saved_cfg(self) -> None:
+        """Clean up after the removed in-game "Save as Default" feature.
+
+        It wrote cfg/vroid_saved.cfg through con_logfile. If logging stayed switched on,
+        that file kept collecting console output and was replayed at every start.
+        """
+        for d in [os.path.join(self.game_root, x) for x in os.listdir(self.game_root)]:
+            cfg = os.path.join(d, "cfg", SAVED_CFG)
+            if os.path.isfile(cfg):
+                size = os.path.getsize(cfg)
+                os.remove(cfg)
+                self.log(f"Removed {cfg} ({size} bytes) left by an older version.")
+        config = os.path.join(self.game_root, "portal2", "cfg", "config.cfg")
+        if os.path.isfile(config):
+            with open(config, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+            new = "".join(ln for ln in text.splitlines(keepends=True) if "vroid_saved" not in ln)
+            if new != text:
+                with open(config, "w", encoding="utf-8", newline="") as f:
+                    f.write(new)
+                self.log("Turned off console logging into vroid_saved.cfg in config.cfg.")
 
     def _unhook(self) -> None:
         for path in (self._gameinfo_path(), os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")):
@@ -375,6 +398,7 @@ class ModManager:
         here = os.path.normcase(os.path.abspath(mod_dir))
         is_last = bool(dlcs) and dlcs[-1] == here
         self._unhook()
+        self._remove_saved_cfg()
         shutil.rmtree(mod_dir)
         if not is_last:
             # Later portal2_dlcN folders only mount if the numbering has no gaps.

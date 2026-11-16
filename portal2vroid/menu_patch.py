@@ -29,7 +29,6 @@ FLYOUT_ITEMS = [
     ("BtnVRoidRightP", "Camera Right", "vroid_cam_right_more"),
     ("BtnVRoidRightM", "Camera Left", "vroid_cam_right_less"),
     ("BtnVRoidReset", "Reset Camera", "vroid_cam_reset"),
-    ("BtnVRoidSave", "Save as Default", "vroid_save"),
 ]
 
 
