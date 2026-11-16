@@ -115,6 +115,7 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     names = zipfile.ZipFile(zp).namelist()
     assert "game/models/player/chell/player.mdl" in names and "game/models/player/chell/anims.mdl" not in names
     assert "build/a1_test_avatar/a1_test_avatar.qc" in names and "vroid_settings.json" in names
+    assert "mod/models/vroid/a1_test_avatar.mdl" in names
 
     v = VPK(os.path.join(mod, "pak01_dir.vpk"))
     assert "scripts/vscripts/vroid/vroid_avatars.nut" in v

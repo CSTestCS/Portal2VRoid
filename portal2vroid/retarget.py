@@ -77,6 +77,9 @@ class ConvertOptions:
     chell_height: float | None = None  # legacy: top-of-mesh height when Chell's model is Z-up
     chell_vertices: np.ndarray | None = None  # Chell's mesh vertex positions (from player.vvd), if available
     chell_skin: tuple | None = None  # (positions, bones, weights) of Chell's mesh, for twist-bone weights
+    # Experimental (made things worse in game in 1.0.5): copy Chell's twist-bone skinning
+    # and place her helper bones along the avatar's limbs. Off by default.
+    twist_weights: bool = False
 
 
 def _sanitize_bone_name(name: str, idx: int, taken: set[str]) -> str:
@@ -309,7 +312,7 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
             anc, desc = mapped_ancestor(i), nearest_mapped_descendant(i)
             par = c_parents[i]
             par_child = _mapped_child_of(par, c_children, node_of_chell) if 0 <= par < n_chell and par in node_of_chell else None
-            if desc is None and par_child is not None and out_world[par] is not None:
+            if opts.twist_weights and desc is None and par_child is not None and out_world[par] is not None:
                 # Helper bone hanging off a mapped limb bone (e.g. a twist joint): keep its
                 # relative place along the limb, scaled to the avatar's limb length.
                 seg_c = c_pos[par_child] - c_pos[par]
@@ -420,7 +423,9 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
 
     resolve_cache: dict[int, int] = {}
     meshes: list[OutMesh] = []
-    twist_profiles = _twist_profiles(opts.chell_skin, c_pos, c_children, node_of_chell, c_names, warnings)
+    twist_profiles = (
+        _twist_profiles(opts.chell_skin, c_pos, c_children, node_of_chell, c_names, warnings) if opts.twist_weights else {}
+    )
     for pi, prim in enumerate(vrm.primitives):
         pos, nrm = posed[pi]
 

@@ -238,7 +238,9 @@ def test_twist_helpers_get_weights_like_chell():
     weights = np.zeros((50, 3))
     bones[:, 0], bones[:, 1] = el, tw
     weights[:, 0], weights[:, 1] = 1 - t, t  # elbow near the elbow, twist bone near the wrist
-    res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions(chell_skin=(pos, bones, weights)))
+    off = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions(chell_skin=(pos, bones, weights)))
+    assert not any("Twist bones" in w for w in off.warnings)  # experimental, off by default
+    res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions(chell_skin=(pos, bones, weights), twist_weights=True))
     assert any("lowArmL_twist0_0" in w for w in res.warnings)
     # the twist helper sits on the avatar's own forearm (between its elbow and wrist)
     out = {b.name: b for b in res.bones}

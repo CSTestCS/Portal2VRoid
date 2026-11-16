@@ -629,6 +629,10 @@ class ModManager:
                     for fn in fns:
                         full = os.path.join(dirpath, fn)
                         z.write(full, "build/" + os.path.relpath(full, build).replace("\\", "/"))
+                mdir = self._path("models", "vroid")
+                if os.path.isdir(mdir):
+                    for fn in os.listdir(mdir):
+                        z.write(os.path.join(mdir, fn), "mod/models/vroid/" + fn)
                 for rel in ("scripts/vscripts/vroid/vroid_avatars.nut",):
                     if os.path.isfile(self._path(*rel.split("/"))):
                         z.write(self._path(*rel.split("/")), "mod/" + rel)
