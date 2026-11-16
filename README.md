@@ -12,8 +12,8 @@ Play Portal 2 as your own **VRoid / VRM avatar** instead of Chell, with a
 * Key binding for third person (default **V**), also listed under *Options → Keyboard*.
 * Hair, skirts and other VRM "spring bones" swing via Source jigglebones. A cel-shading
   light ramp gives the avatar an anime look.
-* One `.exe`. It finds Portal 2 through Steam, installs into its own `portal2_vroid` folder, and never
-  modifies Valve's files.
+* One `.exe`. It finds Portal 2 through Steam, installs into its own `portal2_vroid` folder. Besides that
+  folder it only adds one line each to `gameinfo.txt` and `autoexec.cfg`, which Uninstall removes.
 
 ## Install
 
