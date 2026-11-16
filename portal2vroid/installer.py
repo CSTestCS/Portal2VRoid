@@ -25,6 +25,7 @@ CHELL_MODEL = "models/player/chell/player.mdl"
 SETTINGS_FILE = "vroid_settings.json"
 AVATARS_FILE = "vroid_avatars.json"
 SAVED_CFG = "vroid_saved.cfg"
+HOOK_TAG = "// Portal2VRoid"
 
 BIND_ACTIONS = [
     ("vroid_tp_toggle", "Toggle third-person camera"),
@@ -170,8 +171,103 @@ class ModManager:
             self.save_settings(Settings())
         else:
             self.regenerate()
-        self.log("Install complete.")
+        self._hook_gameinfo()
+        self._hook_autoexec()
+        for line in self.diagnose():
+            self.log("  " + line)
+        self.log("Install complete. Restart Portal 2 if it is running.")
         return self.mod_dir
+
+    # ------------------------------------------------------------- hooks
+    def _gameinfo_path(self) -> str:
+        return os.path.join(self.game_root, "portal2", "gameinfo.txt")
+
+    def _hook_gameinfo(self) -> None:
+        """Register the mod folder as the first search path so Portal 2 always loads it.
+
+        portal2_dlcN folders are normally mounted automatically, but registering the
+        folder in gameinfo.txt makes it independent of that. A backup is kept.
+        """
+        path = self._gameinfo_path()
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+        text = _strip_tagged_lines(text)
+        m = re.search(r"SearchPaths\s*\{[^\n]*\n", text, re.I)
+        if not m:
+            self.log("! gameinfo.txt has no SearchPaths block; relying on the DLC folder only.")
+            return
+        if not os.path.isfile(path + ".vroid_backup"):
+            shutil.copyfile(path, path + ".vroid_backup")
+        folder = os.path.basename(self.mod_dir)
+        line = f"\t\t\tGame\t\t\t\t|gameinfo_path|../{folder} {HOOK_TAG}\n"
+        text = text[: m.end()] + line + text[m.end() :]
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+        self.log(f"Registered {folder} in portal2/gameinfo.txt.")
+
+    def _hook_autoexec(self) -> None:
+        """Run our boot cfg at game start (keys + console commands work even before a map loads)."""
+        path = os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        text = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        text = _strip_tagged_lines(text)
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += f"exec vroid/vroid_boot {HOOK_TAG}\n"
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+
+    def _unhook(self) -> None:
+        for path in (self._gameinfo_path(), os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")):
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8", errors="replace") as f:
+                    text = f.read()
+                new = _strip_tagged_lines(text)
+                if new != text:
+                    with open(path, "w", encoding="utf-8", newline="") as f:
+                        f.write(new)
+
+    def diagnose(self) -> list[str]:
+        """Human-readable checklist of everything the mod needs."""
+        from .compiler import find_studiomdl
+
+        out = []
+
+        def check(ok, msg):
+            out.append(("OK    " if ok else "PROBLEM ") + msg)
+
+        if not self.mod_dir:
+            check(False, "mod is not installed (click Install / Repair)")
+            return out
+        check(True, f"mod folder: {self.mod_dir}")
+        try:
+            with open(self._gameinfo_path(), encoding="utf-8", errors="replace") as f:
+                gi = f.read()
+            check(HOOK_TAG in gi, "registered in portal2/gameinfo.txt" + ("" if HOOK_TAG in gi else
+                  " (missing - Steam 'verify files' removes it; click Install / Repair)"))
+        except OSError:
+            check(False, "cannot read portal2/gameinfo.txt")
+        ae = os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")
+        ok = os.path.isfile(ae) and HOOK_TAG in open(ae, encoding="utf-8", errors="replace").read()
+        check(ok, "autoexec.cfg loads the mod's keys and commands")
+        vpk_path = self._path("pak01_dir.vpk")
+        try:
+            from .vpk import VPK
+
+            v = VPK(vpk_path)
+            for rel in ("scripts/vscripts/mapspawn.nut", "scripts/vscripts/vroid/vroid_main.nut", "cfg/vroid/vroid_boot.cfg"):
+                check(rel in v, f"pak01_dir.vpk contains {rel}")
+        except (OSError, ValueError):
+            check(False, "pak01_dir.vpk missing or unreadable (click Install / Repair)")
+        avatars = self.avatars()
+        check(bool(avatars), f"{len(avatars)} avatar(s) converted")
+        for a in avatars:
+            check(os.path.isfile(self._path("models", "vroid", a.model_id + ".mdl")), f"model file for '{a.name}' ({a.model_path})")
+        check(find_studiomdl(self.game_root) is not None, "studiomdl.exe found in Portal 2\\bin (needed to convert avatars)")
+        return out
 
     def _patch_menus(self, fs: GameFS) -> None:
         menus = fs.list(lambda p: "ingamemainmenu" in p and p.endswith(".res"), prefix="resource/ui")
@@ -235,12 +331,18 @@ class ModManager:
         self._pack_vpk()
 
     def _pack_vpk(self) -> None:
-        """Duplicate the small text files into pak01_dir.vpk (belt and braces for mounting)."""
+        """Pack every game file into pak01_dir.vpk.
+
+        Portal 2 searches VPK archives before loose folders, so loose overrides
+        (mapspawn.nut, the pause menu, kb_act.lst) would be hidden by Valve's VPK.
+        Our own VPK in a higher-priority folder wins.
+        """
         files = {}
+        skip = {MOD_MARKER, SETTINGS_FILE, AVATARS_FILE, "pak01_dir.vpk", "placeholder.txt"}
         for dirpath, dirnames, fns in os.walk(self.mod_dir):
             dirnames[:] = [d for d in dirnames if not d.startswith("_")]
             for fn in fns:
-                if not fn.lower().endswith((".nut", ".cfg", ".res", ".lst")):
+                if fn in skip:
                     continue
                 full = os.path.join(dirpath, fn)
                 rel = os.path.relpath(full, self.mod_dir).replace("\\", "/")
@@ -259,6 +361,7 @@ class ModManager:
         dlcs = [os.path.normcase(os.path.abspath(d)) for d in dlc_dirs(self.game_root)]
         here = os.path.normcase(os.path.abspath(mod_dir))
         is_last = bool(dlcs) and dlcs[-1] == here
+        self._unhook()
         shutil.rmtree(mod_dir)
         if not is_last:
             # Later portal2_dlcN folders only mount if the numbering has no gaps.
@@ -363,6 +466,10 @@ class ModManager:
                 if fn.split(".", 1)[0] == model_id:
                     os.remove(os.path.join(mdir, fn))
         shutil.rmtree(self._path("materials", "models", "vroid", model_id), ignore_errors=True)
+
+
+def _strip_tagged_lines(text: str) -> str:
+    return "".join(ln for ln in text.splitlines(keepends=True) if HOOK_TAG not in ln)
 
 
 def _squirrel_str(s: str) -> str:

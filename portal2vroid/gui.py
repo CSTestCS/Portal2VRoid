@@ -33,11 +33,22 @@ def run_gui(game_arg: str | None = None) -> int:
     root = tk.Tk()
     root.title(f"Portal 2 VRoid Avatar Mod {__version__}")
     root.minsize(760, 640)
-    logq: queue.Queue[str] = queue.Queue()
+    logq: queue.Queue = queue.Queue()  # str = log line, callable = run on the UI thread
     state = {"mgr": None, "busy": False}
+    log_path = _log_file_path()
 
     def log(msg: str):
-        logq.put(str(msg))
+        msg = str(msg)
+        logq.put(msg)
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(msg + "\n")
+        except OSError:
+            pass
+
+    def ui(fn):
+        """Run fn on the Tk thread (Tk must not be touched from worker threads)."""
+        logq.put(fn)
 
     # ------------------------------------------------------------ layout
     main = ttk.Frame(root, padding=10)
@@ -118,6 +129,8 @@ def run_gui(game_arg: str | None = None) -> int:
     ttk.Combobox(f_opt, textvariable=tex_var, values=(512, 1024, 2048, 4096), width=6, state="readonly").grid(row=0, column=3)
     btn_save = ttk.Button(f_opt, text="Save settings")
     btn_save.grid(row=1, column=3, sticky="e")
+    btn_check = ttk.Button(f_opt, text="Check installation")
+    btn_check.grid(row=1, column=2, sticky="e", padx=6)
 
     f_log = ttk.LabelFrame(main, text="Log", padding=6)
     f_log.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
@@ -181,7 +194,7 @@ def run_gui(game_arg: str | None = None) -> int:
         inst = m is not None and m.installed
         for b in (btn_uninstall, btn_remove, btn_default, btn_chell, btn_save):
             b.state(["!disabled"] if inst and not busy else ["disabled"])
-        for b in (btn_install, btn_add):
+        for b in (btn_install, btn_add, btn_check):
             b.state(["!disabled"] if m is not None and not busy else ["disabled"])
 
     def run_bg(fn, done_msg=None):
@@ -196,10 +209,11 @@ def run_gui(game_arg: str | None = None) -> int:
             except Exception as e:  # noqa: BLE001 - shown to the user
                 log("ERROR: " + str(e))
                 log(traceback.format_exc())
-                root.after(0, lambda: messagebox.showerror("Portal2VRoid", str(e)[:1500]))
+                msg = str(e)[:1500]
+                ui(lambda: messagebox.showerror("Portal2VRoid", msg + f"\n\nFull log: {log_path}"))
             finally:
                 state["busy"] = False
-                root.after(0, refresh)
+                ui(refresh)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -230,7 +244,19 @@ def run_gui(game_arg: str | None = None) -> int:
         scale = float(height_var.get() or 1.0)
         if m.installed:
             m.save_settings(ui_settings(m))
-        run_bg(lambda: m.add_avatar(path, None, scale), "Avatar ready. In game: pause menu > VRoid Avatar / Camera.")
+        def work():
+            log(f"=== Adding {path}")
+            m.install()  # always refresh the mod files and game hooks first
+            av = m.add_avatar(path, None, scale)
+            names = ", ".join(a.name for a in m.avatars())
+            log(f"Avatar list is now: {names}")
+            ui(lambda: messagebox.showinfo(
+                "Portal2VRoid",
+                f"'{av.name}' was converted and installed.\n\nRestart Portal 2, load a single-player map, "
+                "then press V (third person) or use Pause menu > VRoid Avatar / Camera.",
+            ))
+
+        run_bg(work)
 
     def do_remove():
         m, i = mgr(), selected_id()
@@ -259,12 +285,35 @@ def run_gui(game_arg: str | None = None) -> int:
     btn_default.configure(command=lambda: set_default(selected_id()))
     btn_chell.configure(command=lambda: set_default(0))
     btn_save.configure(command=do_save)
+
+    def do_check():
+        m = mgr()
+        if not m:
+            messagebox.showwarning("Portal2VRoid", "Portal 2 folder not found.")
+            return
+        lines = m.diagnose()
+        log("=== Installation check")
+        for ln in lines:
+            log("  " + ln)
+        bad = [ln for ln in lines if ln.startswith("PROBLEM")]
+        messagebox.showinfo("Installation check", "\n".join(lines) + (
+            "\n\nEverything looks right." if not bad else "\n\nClick Install / Repair to fix problems."
+        ) + f"\n\nLog file: {log_path}")
+
+    btn_check.configure(command=do_check)
     game_var.trace_add("write", lambda *_: refresh())
 
     def pump():
         try:
             while True:
-                txt.insert("end", logq.get_nowait() + "\n")
+                item = logq.get_nowait()
+                if callable(item):
+                    try:
+                        item()
+                    except Exception as e:  # noqa: BLE001
+                        txt.insert("end", f"UI error: {e}\n")
+                    continue
+                txt.insert("end", item + "\n")
                 txt.see("end")
         except queue.Empty:
             pass
@@ -274,3 +323,13 @@ def run_gui(game_arg: str | None = None) -> int:
     pump()
     root.mainloop()
     return 0
+
+
+def _log_file_path() -> str:
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    d = os.path.join(base, "Portal2VRoid")
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        d = os.getcwd()
+    return os.path.join(d, "Portal2VRoid.log")

@@ -68,13 +68,22 @@ Click **Save settings**, then restart Portal 2.
 
 ## Troubleshooting
 
-* **The pause-menu entry is missing or does nothing.** Use the keys or console commands above.
-  They work the same way. Run `vroid_status` in the console to check the mod is loaded.
-  Re-run **Install / Repair** after Portal 2 updates.
-* **The avatar doesn't appear.** Open the console (enable it under *Options → Keyboard →
-  Advanced*) and look for lines starting with `[VRoid]`.
-* **Conversion fails.** The log shows studiomdl's error. The model sources are left in
-  `portal2_dlcN\_build\<avatar>\` (including `studiomdl.log`) for inspection.
+1. In the app, click **Check installation**. Every line should say `OK`. If any says
+   `PROBLEM`, click **Install / Repair** and check again. Steam's "Verify integrity of game
+   files" removes the mod's line from `portal2/gameinfo.txt`, so run **Install / Repair**
+   again after verifying.
+2. Restart Portal 2 completely after installing or adding avatars.
+3. In a single-player map, open the console (enable it under *Options → Keyboard →
+   Advanced*) and type `vroid_status`. Lines starting with `[VRoid]` show which avatar is
+   active, the player's current model, and whether the mod's update loop is running.
+   If `vroid_status` is an unknown command, the mod folder isn't being loaded (see step 1).
+   `exec vroid` starts the mod by hand on the current map.
+4. The app keeps a full log at `%LOCALAPPDATA%\Portal2VRoid\Portal2VRoid.log`. If a
+   conversion fails, studiomdl's output is in `portal2_dlcN\_build\<avatar>\studiomdl.log`.
+
+The installer changes two of Portal 2's own files, and **Uninstall** puts both back:
+`portal2/gameinfo.txt` (one search-path line, backup kept as `gameinfo.txt.vroid_backup`) and
+`portal2/cfg/autoexec.cfg` (one `exec` line, so keys work from game start).
 
 ## How it works
 

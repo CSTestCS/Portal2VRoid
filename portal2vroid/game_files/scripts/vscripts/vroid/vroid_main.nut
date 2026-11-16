@@ -38,7 +38,12 @@ if (!("VRoidDefaults" in getroottable()))
 
 	tpApplied = -1,
 	camDirty = true,
-	cheatsByUs = false
+	cheatsByUs = false,
+
+	tickId = 0,
+	lastTick = -1.0,
+	ticks = 0,
+	lastError = ""
 };
 
 //-----------------------------------------------------------------------------
@@ -202,6 +207,10 @@ if (!("VRoidDefaults" in getroottable()))
 	VRoid_Log("avatar=" + VRoid_AvatarName(v.avatar) + " (" + v.avatar + ") thirdperson=" + v.tp +
 		" dist=" + v.dist + " up=" + v.up + " right=" + v.right + " avatars installed=" + ::VRoidAvatars.len());
 	foreach (a in ::VRoidAvatars) VRoid_Log("  [" + a.id + "] " + a.name + " -> " + a.model);
+	local p = GetPlayer();
+	VRoid_Log("player model now: " + (p == null ? "(no player)" : p.GetModelName()));
+	VRoid_Log("ticks: " + v.ticks + (v.lastError != "" ? ("  last error: " + v.lastError) : ""));
+	if (v.ticks == 0) VRoid_Log("NOT RUNNING: the update loop has not started on this map.");
 }
 
 //-----------------------------------------------------------------------------
@@ -218,10 +227,14 @@ if (!("VRoidDefaults" in getroottable()))
 }
 
 ::VRoid_SetPlayerModel <- function(p, model) {
-	local mins = p.GetBoundingMins();
-	local maxs = p.GetBoundingMaxs();
+	local mins = null;
+	local maxs = null;
+	try { mins = p.GetBoundingMins(); maxs = p.GetBoundingMaxs(); } catch (e) {}
 	p.SetModel(model);
-	p.SetSize(mins, maxs); // keep the player's collision box exactly as it was
+	if (mins != null) {
+		try { p.SetSize(mins, maxs); } catch (e) {} // keep the player's collision box as it was
+	}
+	VRoid_Log("player model -> " + model);
 }
 
 // Source can only switch to a model that is precached on this map, and VScript in
@@ -324,31 +337,62 @@ if (!("VRoidDefaults" in getroottable()))
 		if (!v.restored && Time() - v.bootTime < 0.6) return;
 		v.initialized = true;
 		if (!v.restored) {
-			// First map since the game started: apply installer defaults, keybinds
-			// and anything saved in-game with "Save as default".
+			// First map since the game started: apply installer defaults and
+			// anything saved in-game with "Save as default".
 			v.restored = true;
-			VRoid_Cmd("exec vroid/vroid_binds");
 			VRoid_Cmd("exec vroid_saved");
 			VRoid_SaveSession();
 		}
+		VRoid_Log("active: avatar=" + VRoid_AvatarName(v.avatar) + ", third person=" + (v.tp ? "on" : "off"));
 		v.wait = 3;
 		return;
 	}
 	VRoid_Process(p);
 }
 
+// Update loop. Two independent drivers (a self-rescheduling worldspawn input and
+// a logic_timer) so the loop runs even if one of them is unavailable; ticks closer
+// than 0.08 s apart are skipped, so having both is harmless.
+::VRoid_SafeTick <- function() {
+	local v = ::VRoid;
+	local now = Time();
+	if (v.lastTick >= 0 && now - v.lastTick < 0.08 && now >= v.lastTick) return;
+	v.lastTick = now;
+	v.ticks++;
+	try {
+		VRoid_Tick();
+	} catch (e) {
+		if (v.lastError != e + "") VRoid_Log("error: " + e);
+		v.lastError = e + "";
+	}
+}
+
+::VRoid_ChainTick <- function(id) {
+	if (id != ::VRoid.tickId) return;
+	VRoid_SafeTick();
+	local w = Entities.FindByClassname(null, "worldspawn");
+	if (w != null) EntFireByHandle(w, "RunScriptCode", "VRoid_ChainTick(" + id + ")", 0.1, null, null);
+}
+
 ::VRoid_StartTimer <- function() {
+	::VRoid.tickId = RandomInt(1, 1000000000);
+	local w = Entities.FindByClassname(null, "worldspawn");
+	if (w != null) EntFireByHandle(w, "RunScriptCode", "VRoid_ChainTick(" + ::VRoid.tickId + ")", 0.1, null, null);
+	else VRoid_Log("worldspawn not found; using the timer only");
+
 	if (Entities.FindByName(null, "vroid_timer") != null) return;
 	local t = Entities.CreateByClassname("logic_timer");
 	if (t == null) { VRoid_Log("could not create timer"); return; }
 	t.__KeyValueFromString("targetname", "vroid_timer");
 	EntFireByHandle(t, "AddOutput", "RefireTime 0.1", 0.0, null, null);
-	EntFireByHandle(t, "AddOutput", "OnTimer vroid_timer:RunScriptCode:VRoid_Tick():0:-1", 0.0, null, null);
+	EntFireByHandle(t, "AddOutput", "OnTimer vroid_timer:RunScriptCode:VRoid_SafeTick():0:-1", 0.0, null, null);
 	EntFireByHandle(t, "Enable", "", 0.2, null, null);
 }
 
 // Single player only: co-op uses the robot models and blocks third person.
 if (GetMapName().tolower().find("mp_coop") != 0) {
 	VRoid_StartTimer();
-	VRoid_Log("loaded (" + ::VRoidAvatars.len() + " avatars installed)");
+	VRoid_Log("loaded (" + ::VRoidAvatars.len() + " avatars installed) on " + GetMapName());
+} else {
+	VRoid_Log("co-op map: mod disabled");
 }

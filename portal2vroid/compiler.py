@@ -61,6 +61,7 @@ def compile_model(
             cmd,
             cwd=os.path.dirname(qc_path),
             env=env,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -80,7 +81,10 @@ def compile_model(
     out_dir = os.path.join(mod_dir, "models", "vroid")
     os.makedirs(out_dir, exist_ok=True)
     moved = []
-    for search in (os.path.join(game_dir, "models", "vroid"),):
+    # studiomdl normally writes to portal2/models, but look in every game folder.
+    searches = sorted(set(glob.glob(os.path.join(game_root, "*", "models", "vroid"))) | {os.path.join(game_dir, "models", "vroid")})
+    searches = [d for d in searches if os.path.normcase(os.path.abspath(d)) != os.path.normcase(os.path.abspath(out_dir))]
+    for search in searches:
         for path in glob.glob(os.path.join(search, model_id + ".*")):
             if path.lower().endswith(MODEL_EXTS):
                 dst = os.path.join(out_dir, os.path.basename(path))

@@ -12,11 +12,27 @@ from portal2vroid.vpk import VPK, write_vpk
 from . import fixtures
 
 
+GAMEINFO = """"GameInfo"
+{
+	game	"Portal 2"
+	FileSystem
+	{
+		SteamAppId	620
+		SearchPaths
+		{
+			Game	|gameinfo_path|.
+			Game	portal2
+		}
+	}
+}
+"""
+
+
 @pytest.fixture
 def game(tmp_path):
     root = tmp_path / "Portal 2"
     (root / "portal2").mkdir(parents=True)
-    (root / "portal2" / "gameinfo.txt").write_text('"GameInfo" { game "Portal 2" }')
+    (root / "portal2" / "gameinfo.txt").write_text(GAMEINFO)
     (root / "portal2_dlc1").mkdir()
     (root / "portal2_dlc2").mkdir()
     (root / "bin").mkdir()
@@ -68,11 +84,19 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     binds = open(os.path.join(mod, "cfg/vroid/vroid_binds.cfg")).read()
     assert 'bind "v" "vroid_tp_toggle"' in binds
 
+    gi = (game / "portal2" / "gameinfo.txt").read_text()
+    assert "\t\t\tGame\t\t\t\t|gameinfo_path|../portal2_dlc3 // Portal2VRoid\n" in gi
+    assert gi.index("portal2_dlc3") < gi.index("|gameinfo_path|.\n")  # first search path
+    assert (game / "portal2" / "gameinfo.txt.vroid_backup").read_text() == GAMEINFO
+    assert "exec vroid/vroid_boot" in (game / "portal2" / "cfg" / "autoexec.cfg").read_text()
+    assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "studiomdl" not in ln]
+
     # GameFS must ignore our own folder when reading originals
     fs = GameFS(str(game), exclude_dir=mod)
     assert fs.read("scripts/vscripts/mapspawn.nut") == b'printl("mapspawn")\n'
     # re-install is idempotent (still one entry, patched from the original)
     m.install()
+    assert (game / "portal2" / "gameinfo.txt").read_text().count("Portal2VRoid") == 1
     menu_text = open(os.path.join(mod, "resource/ui/basemodui/ingamemainmenu.res")).read()
     assert [c.key for c in kv.parse(menu_text).blocks()[0].blocks()].count("BtnVRoid") == 1
 
@@ -88,6 +112,9 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
 
     v = VPK(os.path.join(mod, "pak01_dir.vpk"))
     assert "scripts/vscripts/vroid/vroid_avatars.nut" in v
+    assert "scripts/vscripts/mapspawn.nut" in v and "resource/ui/basemodui/ingamemainmenu.res" in v
+    assert "models/vroid/a1_test_avatar.mdl" in v and "materials/models/vroid/a1_test_avatar/body_skin.vmt" in v
+    assert "vroid_settings.json" not in v
     assert v.read("scripts/vscripts/vroid/vroid_avatars.nut").decode() == nut
 
     av2 = m.add_avatar(str(vrm_path), name="Second")
@@ -97,8 +124,11 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     nut = open(os.path.join(mod, "scripts/vscripts/vroid/vroid_avatars.nut")).read()
     assert "a1_test_avatar" not in nut and "avatar = 2," in nut
 
+    (game / "portal2" / "cfg" / "autoexec.cfg").write_text("bind x jump\n" + (game / "portal2" / "cfg" / "autoexec.cfg").read_text())
     m.uninstall()
     assert not os.path.exists(mod)
+    assert (game / "portal2" / "gameinfo.txt").read_text() == GAMEINFO
+    assert (game / "portal2" / "cfg" / "autoexec.cfg").read_text() == "bind x jump\n"
     assert find_mod_dir(str(game)) is None
 
 
