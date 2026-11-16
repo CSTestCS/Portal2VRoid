@@ -198,6 +198,7 @@ class ModManager:
             self.save_settings(Settings())
         else:
             self.regenerate()
+        self._copy_soundcache(fs)
         self._hook_autoexec()
         self._remove_saved_cfg()
         for line in self.diagnose():
@@ -211,7 +212,7 @@ class ModManager:
 
     # Files and folders inside the mod folder that belong to the mod.
     OWN_PATHS = (
-        MOD_MARKER, SETTINGS_FILE, AVATARS_FILE, "pak01_dir.vpk", "_build", "models/vroid",
+        MOD_MARKER, SETTINGS_FILE, AVATARS_FILE, "pak01_dir.vpk", "_build", "models/vroid", "maps/soundcache",
         "materials/models/vroid", "scripts/vscripts/mapspawn.nut", "scripts/vscripts/vroid",
         "scripts/kb_act.lst", "cfg/vroid", "cfg/vroid.cfg", "resource/ui/basemodui",
     )
@@ -329,6 +330,7 @@ class ModManager:
                   " (an older version's line is still there - click Install / Repair)"))
         except OSError:
             check(False, "cannot read portal2/gameinfo.txt")
+        check(os.path.isfile(self._path(*self.SOUNDCACHE.split("/"))), "sound cache copied into the mod folder")
         ae = os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")
         ok = os.path.isfile(ae) and HOOK_TAG in open(ae, encoding="utf-8", errors="replace").read()
         check(ok, "autoexec.cfg loads the mod's keys and commands")
@@ -350,6 +352,29 @@ class ModManager:
         check(have, "studiomdl.exe found (needed to convert avatars)" + ("" if have else
               " - install 'Portal 2 Authoring Tools - Beta' from Steam Library > Tools"))
         return out
+
+    SOUNDCACHE = "maps/soundcache/_master.cache"
+
+    def _copy_soundcache(self, fs: GameFS) -> None:
+        """A portal2_dlcN folder needs its own copy of the game's sound cache.
+
+        Without it Portal 2 rebuilds the cache at startup and can hang before the menu.
+        """
+        src = os.path.join(self.game_root, "portal2", *self.SOUNDCACHE.split("/"))
+        data = None
+        if os.path.isfile(src):
+            with open(src, "rb") as f:
+                data = f.read()
+        else:
+            data = fs.read(self.SOUNDCACHE)
+        dst = self._path(*self.SOUNDCACHE.split("/"))
+        if not data:
+            self.log("! portal2/maps/soundcache/_master.cache not found; verify Portal 2's files in Steam.")
+            return
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        with open(dst, "wb") as f:
+            f.write(data)
+        self.log(f"Copied Portal 2's sound cache into the mod folder ({len(data) // 1024} KB).")
 
     def _remove_menu_files(self) -> None:
         d = self._path("resource", "ui", "basemodui")

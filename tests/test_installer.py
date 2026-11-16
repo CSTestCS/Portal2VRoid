@@ -49,6 +49,8 @@ def game(tmp_path):
     )
     (root / "portal2" / "scripts").mkdir()
     (root / "portal2" / "scripts" / "kb_act.lst").write_text(fixtures.KB_ACT)
+    (root / "portal2" / "maps" / "soundcache").mkdir(parents=True)
+    (root / "portal2" / "maps" / "soundcache" / "_master.cache").write_bytes(b"SNDCACHE" * 100)
     return root
 
 
@@ -86,6 +88,7 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     assert 'bind "v" "vroid_tp_toggle"' in binds
 
     assert (game / "portal2" / "gameinfo.txt").read_text() == GAMEINFO  # never edited
+    assert open(os.path.join(mod, "maps", "soundcache", "_master.cache"), "rb").read() == b"SNDCACHE" * 100
     assert "exec vroid/vroid_boot" in (game / "portal2" / "cfg" / "autoexec.cfg").read_text()
     assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "studiomdl" not in ln]
 
@@ -162,7 +165,8 @@ def test_migrates_gameinfo_install(game):
     assert os.path.isfile(game / "portal2_dlc3" / "models" / "vroid" / "a1_miku.mdl")
     assert [a.name for a in m.avatars()] == ["Miku"]
     assert (game / "portal2" / "SAVE" / "123" / "quick.sav").read_bytes() == b"save"
-    assert not (game / "portal2_dlc3" / "maps").exists() and not (game / "portal2_dlc3" / "cfg" / "config.cfg").exists()
+    assert (game / "portal2_dlc3" / "maps" / "soundcache" / "_master.cache").read_bytes() == b"SNDCACHE" * 100  # real one, not the junk
+    assert not (game / "portal2_dlc3" / "cfg" / "config.cfg").exists()
     assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "model file" not in ln]
 
 
