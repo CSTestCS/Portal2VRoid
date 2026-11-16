@@ -58,7 +58,7 @@ _SIDE_PATTERNS = [
     (re.compile(r"(^|[_\s.\-])(l|left)([_\s.\-]|$)"), "left"),
     (re.compile(r"(^|[_\s.\-])(r|right)([_\s.\-]|$)"), "right"),
 ]
-_HELPER = re.compile(r"helper|twist|ulna|wrist|bicep|trap|pect|elbow|hlp|_jnt_end|_end$|nub|jiggle|_jig|dummy|attach|weapon|prop")
+_HELPER = re.compile(r"helper|twist|ulna|trap|pect|hlp|_jnt_end|_end$|nub|jiggle|_jig|dummy|attach|weapon|prop|scap|jacket|spring|sleeve")
 
 
 def _normalize(name: str) -> str:
@@ -120,6 +120,8 @@ def classify_source_bones(names: list[str], parents: list[int]) -> tuple[dict[st
         if side is None:
             if re.fullmatch(r"(pelvis|hips?|hip_?root)", core):
                 add("hips", i, score)
+            elif core == "root":  # Portal 2 Chell: "root" is her pelvis
+                add("hips", i, score + 60)
             elif re.fullmatch(r"spine_?\d*|chest|upper_?chest|torso_?\d*", core):
                 spines.append(i)
             elif re.fullmatch(r"neck_?\d*", core):
@@ -133,10 +135,16 @@ def classify_source_bones(names: list[str], parents: list[int]) -> tuple[dict[st
             add(f"{side}Shoulder", i, score + 50)  # weaker: often a helper in HL2 rigs
         elif re.fullmatch(r"upper_?arm|up_?arm|arm", core):
             add(f"{side}UpperArm", i, score)
+        elif re.fullmatch(r"bicep", core):  # Portal 2 Chell: bicep_L (a helper in HL2 rigs)
+            add(f"{side}UpperArm", i, score + 30)
         elif re.fullmatch(r"fore_?arm|lower_?arm|low_?arm", core):
             add(f"{side}LowerArm", i, score)
+        elif re.fullmatch(r"elbow", core):  # Portal 2 Chell: elbow_L
+            add(f"{side}LowerArm", i, score + 30)
         elif re.fullmatch(r"hand", core):
             add(f"{side}Hand", i, score)
+        elif re.fullmatch(r"wrist", core):  # Portal 2 Chell: wrist_L
+            add(f"{side}Hand", i, score + 30)
         elif re.fullmatch(r"thigh|upper_?leg|up_?leg", core):
             add(f"{side}UpperLeg", i, score)
         elif re.fullmatch(r"hip", core):  # TF2-style rigs: bip_hip_L

@@ -36,6 +36,7 @@ def game(tmp_path):
     (root / "portal2_dlc1").mkdir()
     (root / "portal2_dlc2").mkdir()
     (root / "bin").mkdir()
+    (root / "bin" / "studiomdl.exe").write_bytes(b"MZ")
     write_vpk(
         str(root / "portal2" / "pak01_dir.vpk"),
         {
@@ -142,5 +143,58 @@ def test_uninstall_keeps_numbering(game, monkeypatch):
 
 
 def test_compile_requires_studiomdl(game, tmp_path):
+    (game / "bin" / "studiomdl.exe").unlink()
     with pytest.raises(compiler.CompileError):
         compiler.compile_model(str(game), str(tmp_path / "x.qc"), "x", str(tmp_path))
+
+
+def test_portal2_chell_with_animation_include(tmp_path, monkeypatch):
+    """player.mdl without IK chains whose animations (and IK) live in player_animations.mdl."""
+    monkeypatch.setattr(installer, "compile_model", fake_compile)
+    root = tmp_path / "Portal 2"
+    (root / "portal2").mkdir(parents=True)
+    (root / "portal2" / "gameinfo.txt").write_text(GAMEINFO)
+    (root / "bin").mkdir()
+    (root / "bin" / "studiomdl.exe").write_bytes(b"MZ")
+    anims = "models/player/chell/player_animations.mdl"
+    write_vpk(str(root / "portal2" / "pak01_dir.vpk"), {
+        "models/player/chell/player.mdl": fixtures.make_chell_mdl("portal2", with_ik=False, includes=(anims,)),
+        "models/player/chell/player.vvd": fixtures.make_chell_vvd(13.8),
+        anims: fixtures.make_chell_mdl("portal2", includes=()),
+    })
+    logs = []
+    m = ModManager(str(root), log=logs.append)
+    vrm_path = tmp_path / "miku.vrm"
+    vrm_path.write_bytes(fixtures.make_vrm("1.0"))
+    av = m.add_avatar(str(vrm_path))
+    qc_dir = os.path.join(m.mod_dir, "_build")
+    assert not os.path.exists(qc_dir)  # cleaned up after success
+    assert any("IK chains from models/player/chell/player_animations.mdl: lfoot, rfoot, lhand, rhand" in ln for ln in logs)
+    assert av.id == 1
+
+
+def test_qc_includes_chell_animation_models(tmp_path, monkeypatch):
+    captured = {}
+
+    def grab(game_root, qc_path, model_id, mod_dir, log=print, studiomdl=None):
+        captured["qc"] = open(qc_path).read()
+        return fake_compile(game_root, qc_path, model_id, mod_dir, log, studiomdl)
+
+    monkeypatch.setattr(installer, "compile_model", grab)
+    root = tmp_path / "Portal 2"
+    (root / "portal2").mkdir(parents=True)
+    (root / "portal2" / "gameinfo.txt").write_text(GAMEINFO)
+    (root / "bin").mkdir()
+    (root / "bin" / "studiomdl.exe").write_bytes(b"MZ")
+    anims = "models/player/chell/player_animations.mdl"
+    write_vpk(str(root / "portal2" / "pak01_dir.vpk"), {
+        "models/player/chell/player.mdl": fixtures.make_chell_mdl("portal2", with_ik=False, includes=(anims,)),
+        anims: fixtures.make_chell_mdl("portal2", includes=()),
+    })
+    vrm_path = tmp_path / "miku.vrm"
+    vrm_path.write_bytes(fixtures.make_vrm("0.x"))
+    ModManager(str(root), log=lambda *_: None).add_avatar(str(vrm_path))
+    qc = captured["qc"]
+    assert '$includemodel "player/chell/player.mdl"' in qc
+    assert '$includemodel "player/chell/player_animations.mdl"' in qc
+    assert '$ikchain "lfoot" "ankle_L"' in qc

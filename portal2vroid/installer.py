@@ -13,7 +13,7 @@ from . import __version__
 from .compiler import compile_model
 from .gamefs import MOD_MARKER, GameFS, dlc_dirs, find_mod_dir, next_free_dlc_dir
 from .materials import write_materials
-from .mdl import parse_mdl, vvd_height
+from .mdl import parse_mdl, vvd_positions
 from .menu_patch import FLYOUT_RES, build_flyout, patch_ingame_menu, patch_kb_act
 from .retarget import ConvertOptions, convert
 from .source_export import write_model_sources
@@ -26,6 +26,15 @@ SETTINGS_FILE = "vroid_settings.json"
 AVATARS_FILE = "vroid_avatars.json"
 SAVED_CFG = "vroid_saved.cfg"
 HOOK_TAG = "// Portal2VRoid"
+STUDIOMDL_HELP = (
+    "studiomdl.exe (Valve's model compiler) is not installed. It is part of the free "
+    "'Portal 2 Authoring Tools - Beta':\n\n"
+    "1. In Steam, open Library and switch the filter from Games to Tools.\n"
+    "2. Install 'Portal 2 Authoring Tools - Beta'. It installs into your Portal 2 folder "
+    "(Portal 2\\bin\\studiomdl.exe).\n"
+    "3. Click 'Add VRM avatar...' again.\n\n"
+    "If you have studiomdl.exe elsewhere, set it with 'studiomdl.exe...' in the app."
+)
 
 BIND_ACTIONS = [
     ("vroid_tp_toggle", "Toggle third-person camera"),
@@ -56,6 +65,7 @@ class Settings:
     max_texture: int = 2048
     toon_shading: bool = True
     jiggle_bones: bool = True
+    studiomdl_path: str = ""
 
 
 @dataclass
@@ -266,7 +276,10 @@ class ModManager:
         check(bool(avatars), f"{len(avatars)} avatar(s) converted")
         for a in avatars:
             check(os.path.isfile(self._path("models", "vroid", a.model_id + ".mdl")), f"model file for '{a.name}' ({a.model_path})")
-        check(find_studiomdl(self.game_root) is not None, "studiomdl.exe found in Portal 2\\bin (needed to convert avatars)")
+        custom = self.load_settings().studiomdl_path
+        have = (custom and os.path.isfile(custom)) or find_studiomdl(self.game_root) is not None
+        check(have, "studiomdl.exe found (needed to convert avatars)" + ("" if have else
+              " - install 'Portal 2 Authoring Tools - Beta' from Steam Library > Tools"))
         return out
 
     def _patch_menus(self, fs: GameFS) -> None:
@@ -390,8 +403,33 @@ class ModManager:
             data = fs.read(path)
         skel = parse_mdl(data)
         vvd = fs.read(path[:-4] + ".vvd")
-        height = vvd_height(vvd) if vvd else None
-        return skel, path, height
+        verts = vvd_positions(vvd) if vvd else None
+        # Chell's animations live in included models (e.g. player_animations.mdl). Their
+        # IK chains must be declared on our model too, so read them if player.mdl has none.
+        for inc in skel.include_models:
+            rel = inc.replace("\\", "/").lower()
+            if not rel.startswith("models/"):
+                rel = "models/" + rel
+            inc_data = fs.read(rel)
+            if inc_data is None:
+                self.log(f"  ! Chell's included model {rel} not found")
+                continue
+            try:
+                inc_skel = parse_mdl(inc_data)
+            except ValueError as e:
+                self.log(f"  ! could not read {rel}: {e}")
+                continue
+            if not skel.ikchains and inc_skel.ikchains:
+                names = {b.name: i for i, b in enumerate(skel.bones)}
+                remapped = []
+                for ch in inc_skel.ikchains:
+                    links = [names.get(inc_skel.bones[b].name, -1) for b in ch.links]
+                    if all(x >= 0 for x in links):
+                        ch.links = links
+                        remapped.append(ch)
+                skel.ikchains = remapped
+                self.log(f"  IK chains from {rel}: {', '.join(c.name for c in remapped) or 'none'}")
+        return skel, path, verts
 
     def add_avatar(self, vrm_path: str, name: str | None = None, height_scale: float = 1.0) -> Avatar:
         if not self.mod_dir:
@@ -412,13 +450,19 @@ class ModManager:
         model_id = f"a{new_id}_{slug}"
         log(f"  VRM {vrm.version}, {len(vrm.nodes)} nodes, {sum(len(p.indices) for p in vrm.primitives)} triangles")
 
-        chell, chell_path, chell_height = self.load_chell()
-        log(f"  Chell: {len(chell.bones)} bones, height {chell_height or 0:.1f} units, {len(chell.ikchains)} IK chains")
+        from .compiler import CompileError, find_studiomdl
+
+        if not (s.studiomdl_path and os.path.isfile(s.studiomdl_path)) and find_studiomdl(self.game_root) is None:
+            raise CompileError(STUDIOMDL_HELP)
+
+        chell, chell_path, chell_verts = self.load_chell()
+        log(f"  Chell: {len(chell.bones)} bones, {len(chell.ikchains)} IK chains, includes {chell.include_models or 'none'}")
         result = convert(
             vrm,
             chell,
-            ConvertOptions(height_scale=height_scale, jiggle=s.jiggle_bones, chell_height=chell_height),
+            ConvertOptions(height_scale=height_scale, jiggle=s.jiggle_bones, chell_vertices=chell_verts),
         )
+        log("  bone mapping: " + ", ".join(f"{k}={v}" for k, v in result.mapping.items()))
         for w in result.warnings:
             log("  ! " + w)
         log(f"  scale {result.scale:.2f}, {len(result.bones)} bones ({len(result.bones) - result.n_chell} from the avatar)")
@@ -428,8 +472,9 @@ class ModManager:
             log("Converting materials ...")
             vmts = write_materials(vrm, self.mod_dir, model_id, s.max_texture, s.toon_shading, log=log)
             include = chell_path[len("models/") :] if chell_path.startswith("models/") else chell_path
-            qc = write_model_sources(build_dir, model_id, result, chell, vmts, include)
-            compile_model(self.game_root, qc, model_id, self.mod_dir, log=log)
+            extra = [i[len("models/"):] if i.lower().startswith("models/") else i for i in chell.include_models]
+            qc = write_model_sources(build_dir, model_id, result, chell, vmts, [include] + extra)
+            compile_model(self.game_root, qc, model_id, self.mod_dir, log=log, studiomdl=s.studiomdl_path or None)
         except Exception:
             self._remove_model_files(model_id)
             raise

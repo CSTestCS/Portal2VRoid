@@ -131,6 +131,8 @@ def run_gui(game_arg: str | None = None) -> int:
     btn_save.grid(row=1, column=3, sticky="e")
     btn_check = ttk.Button(f_opt, text="Check installation")
     btn_check.grid(row=1, column=2, sticky="e", padx=6)
+    btn_studiomdl = ttk.Button(f_opt, text="studiomdl.exe...")
+    btn_studiomdl.grid(row=2, column=3, sticky="e", pady=(4, 0))
 
     f_log = ttk.LabelFrame(main, text="Log", padding=6)
     f_log.grid(row=5, column=0, sticky="nsew", pady=(6, 0))
@@ -301,6 +303,20 @@ def run_gui(game_arg: str | None = None) -> int:
         ) + f"\n\nLog file: {log_path}")
 
     btn_check.configure(command=do_check)
+
+    def do_studiomdl():
+        m = mgr()
+        if not m or not m.installed:
+            messagebox.showwarning("Portal2VRoid", "Click Install / Repair first.")
+            return
+        path = filedialog.askopenfilename(title="Locate studiomdl.exe", filetypes=[("studiomdl", "studiomdl.exe"), ("All files", "*.*")])
+        if path:
+            s = ui_settings(m)
+            s.studiomdl_path = path
+            m.save_settings(s)
+            log(f"Using studiomdl: {path}")
+
+    btn_studiomdl.configure(command=do_studiomdl)
     game_var.trace_add("write", lambda *_: refresh())
 
     def pump():

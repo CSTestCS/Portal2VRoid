@@ -105,8 +105,9 @@ def write_model_sources(
     result: ConversionResult,
     chell: MDLSkeleton,
     material_names: list[str],
-    chell_model_path: str = "player/chell/player.mdl",
+    chell_model_path="player/chell/player.mdl",
 ) -> str:
+    """``chell_model_path`` may be a list: every entry becomes an $includemodel."""
     """Write all SMDs and the QC. Returns the QC path."""
     os.makedirs(out_dir, exist_ok=True)
     names = [b.name for b in result.bones]
@@ -161,7 +162,14 @@ def write_model_sources(
         '$animation "a_vroid_proportions" "proportions.smd" subtract "reference" 0',
         '$sequence "vroid_proportions" "a_vroid_proportions" predelta autoplay',
         "",
-        f'$includemodel "{chell_model_path}"',
+    ]
+    includes = [chell_model_path] if isinstance(chell_model_path, str) else list(chell_model_path)
+    seen = set()
+    for inc in includes:
+        if inc.lower() not in seen:
+            seen.add(inc.lower())
+            q.append(f'$includemodel "{inc}"')
+    q += [
         "",
     ]
     for ch in chell.ikchains:

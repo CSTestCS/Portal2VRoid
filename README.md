@@ -58,8 +58,11 @@ Click **Save settings**, then restart Portal 2.
   turns on `sv_cheats` to spawn and delete a hidden prop of your avatar. Portal 2's third-person
   camera also requires `sv_cheats 1`. While cheats are on, achievements are paused for that map.
   With the startup avatar set to Chell and third person off, the mod never touches cheats.
-* **Conversion needs `studiomdl.exe`.** It ships with Portal 2 in `Portal 2\bin\`. If it is
-  missing, verify the game files in Steam. Conversion only runs on Windows.
+* **Conversion needs `studiomdl.exe`**, Valve's model compiler. It comes with the free
+  **Portal 2 Authoring Tools - Beta**: in Steam, open *Library*, switch the filter from
+  *Games* to *Tools*, and install it. It installs into `Portal 2\bin\`. If your copy is
+  elsewhere, point the app at it with the **studiomdl.exe...** button. Conversion only runs
+  on Windows.
 * **Source limits.** A model can have at most 128 bones and 3 bone weights per vertex. Extra
   VRM bones (usually hair tips) are merged into their parents to fit. Facial expressions and
   MToon outlines are not converted.

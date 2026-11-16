@@ -74,7 +74,8 @@ class ConvertOptions:
     height_scale: float = 1.0  # multiplier on top of "match Chell's height"
     jiggle: bool = True
     max_bones: int = MAX_BONES
-    chell_height: float | None = None  # top-of-head height (inches); measured from Chell's mesh if known
+    chell_height: float | None = None  # legacy: top-of-mesh height when Chell's model is Z-up
+    chell_vertices: np.ndarray | None = None  # Chell's mesh vertex positions (from player.vvd), if available
 
 
 def _sanitize_bone_name(name: str, idx: int, taken: set[str]) -> str:
@@ -117,13 +118,49 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
     if missing:
         warnings.append("VRM bones without a Chell counterpart (kept, but not animated): " + ", ".join(missing))
 
-    # Chell's facing: +X normally, but measure it.
-    c_left = _horizontal(c_pos[mapping["leftUpperLeg"]] - c_pos[mapping["rightUpperLeg"]], 2)
+    # Chell's frame, measured from her skeleton (don't assume Z-up / +X forward).
+    feet = [mapping[s] for s in ("leftFoot", "rightFoot", "leftLowerLeg", "rightLowerLeg") if s in mapping][:2]
+    base = c_pos[feet].mean(axis=0) if feet else c_pos[[mapping["leftUpperLeg"], mapping["rightUpperLeg"]]].mean(axis=0)
+    c_up = normalize(c_pos[mapping["head"]] - base)
+    if not c_up.any():
+        c_up = np.array([0.0, 0.0, 1.0])
+    # snap to the nearest axis if close (models are authored axis-aligned)
+    ax = int(np.argmax(np.abs(c_up)))
+    if abs(c_up[ax]) > 0.95:
+        c_up = np.eye(3)[ax] * np.sign(c_up[ax])
+    lr = c_pos[mapping["leftUpperLeg"]] - c_pos[mapping["rightUpperLeg"]]
+    c_left = normalize(lr - np.dot(lr, c_up) * c_up)
     if not c_left.any():
-        c_left = np.array([0.0, 1.0, 0.0])
-    c_up = np.array([0.0, 0.0, 1.0])
+        raise ConversionError("Chell's hips are at the same position; cannot work out which way she faces")
     c_fwd = normalize(np.cross(c_left, c_up))
     chell_frame = np.column_stack([c_fwd, c_left, c_up])  # canonical (+X fwd,+Y left,+Z up) -> Chell space
+
+    def up_of(p):
+        return float(np.dot(p, c_up))
+
+    low_joints = [mapping[s] for s in ("leftToes", "rightToes", "leftFoot", "rightFoot") if s in mapping]
+    head_up = up_of(c_pos[mapping["head"]])
+    joint_floor = min(up_of(c_pos[j]) for j in low_joints) if low_joints else 0.0
+    # Chell's floor and full height: from her mesh if it is plausible, else from her skeleton.
+    c_floor = min(0.0, joint_floor) if abs(joint_floor) < 0.15 * max(abs(head_up), 1.0) else joint_floor
+    c_height = None
+    verts = opts.chell_vertices
+    if verts is not None and len(verts):
+        proj = np.asarray(verts, dtype=float) @ c_up
+        lo, hi = float(proj.min()), float(proj.max())
+        head_h_c = head_up - lo
+        if head_h_c > 0 and 1.0 <= (hi - lo) / head_h_c <= 1.6:
+            c_floor, c_height = lo, hi - lo
+        else:
+            warnings.append(
+                f"Chell's mesh height looked wrong ({hi - lo:.1f} units vs head joint {head_h_c:.1f}); "
+                "estimating her height from the skeleton."
+            )
+    elif opts.chell_height and opts.chell_height > head_up - c_floor:
+        c_height = opts.chell_height
+    if c_height is None:
+        c_height = (head_up - c_floor) * 1.15  # the head joint sits at ~87% of a person's height
+    warnings.append(f"Chell: up axis {np.round(c_up, 3).tolist()}, height {c_height:.1f} units")
 
     # ---- VRM basis --------------------------------------------------------
     hv = vrm.humanoid
@@ -141,11 +178,11 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
     head_h = float(vpos_gl[hv["head"]][1]) - floor
     if float(all_pos[:, 1].max()) - floor <= 1e-6 or head_h <= 1e-6:
         raise ConversionError("VRM has zero height")
-    chell_head = float(c_pos[mapping["head"]][2])
+    chell_head = head_up - c_floor
     # Rough scale first (reposing only rotates, so it is scale independent);
     # the exact height match happens after reposing.
     scale = chell_head / head_h
-    offset = np.array([0.0, 0.0, -floor * scale])
+    offset = chell_frame @ np.array([0.0, 0.0, -floor * scale]) + c_up * c_floor
 
     def to_game_pos(p):
         return scale * (m3 @ p) + offset
@@ -219,17 +256,13 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
         posed.append((pos, nrm / nl))
 
     # exact height match on the posed avatar (Chell's height is measured in her rest pose too)
-    zs = np.concatenate([p[0][:, 2] for p in posed])
+    zs = np.concatenate([p[0] @ c_up for p in posed])
     p_floor, p_top = float(zs.min()), float(zs.max())
-    if opts.chell_height and opts.chell_height > chell_head:
-        k = opts.chell_height / (p_top - p_floor)
-    else:
-        k = chell_head / (new_pos[hv["head"]][2] - p_floor)
-        warnings.append("Chell's mesh height unknown; matched head-joint height instead.")
-    k *= opts.height_scale
-    pivot = np.array([0.0, 0.0, p_floor])
-    new_pos = [k * (p - pivot) for p in new_pos]
-    posed = [(k * (pos - pivot), nrm) for pos, nrm in posed]
+    k = c_height / (p_top - p_floor) * opts.height_scale
+    pivot = c_up * p_floor
+    floor_pt = c_up * c_floor
+    new_pos = [k * (p - pivot) + floor_pt for p in new_pos]
+    posed = [(k * (pos - pivot) + floor_pt, nrm) for pos, nrm in posed]
     scale *= k
 
     # ---- output skeleton: Chell bones ------------------------------------
@@ -265,7 +298,11 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
     order_c = sorted(range(n_chell), key=lambda i: _chain_depth(c_parents, i))
     for i in order_c:
         rot = c_world[i][:3, :3]
-        if i in node_of_chell:
+        if i == mapping["hips"] and up_of(c_pos[i]) - c_floor < 0.3 * chell_head:
+            # A "root" bone that sits at the floor (not at the pelvis) keeps Chell's position,
+            # otherwise the proportion delta would lift the whole avatar off the ground.
+            pos = c_pos[i].copy()
+        elif i in node_of_chell:
             pos = new_pos[node_of_chell[i]]
         else:
             anc, desc = mapped_ancestor(i), nearest_mapped_descendant(i)

@@ -195,3 +195,19 @@ def vvd_height(data: bytes) -> float | None:
         return float(z.max()) if len(z) else None
     except (struct.error, ValueError):
         return None
+
+
+def vvd_positions(data: bytes) -> np.ndarray | None:
+    """All vertex positions (N,3) in a .vvd file, or None if unreadable."""
+    try:
+        if data[:4] != b"IDSV":
+            return None
+        vstart, tstart = struct.unpack_from("<ii", data, 56)
+        count = (tstart - vstart) // 48 if tstart > vstart else (len(data) - vstart) // 48
+        if count <= 0:
+            return None
+        verts = np.frombuffer(data, dtype=np.float32, count=count * 12, offset=vstart).reshape(count, 12)
+        pos = verts[:, 4:7].astype(float)
+        return pos[np.all(np.isfinite(pos), axis=1)]
+    except (struct.error, ValueError):
+        return None

@@ -52,8 +52,49 @@ def _bone_specs():
     return s
 
 
-def chell_world_bones():
+_P2_FINGERS = ("thumb", "index", "mid", "ring", "pinky")
+
+
+def _bone_specs_portal2():
+    """The real Portal 2 Chell naming (from the game's player.mdl), with her helper bones."""
+    vb = "ValveBiped.Bip01_"
     specs = _bone_specs()
+    pos = {n: p for n, _, p in specs}
+    rename = {vb + "Pelvis": "root", vb + "Spine": "spine1", vb + "Spine1": "spine2", vb + "Spine4": "spine3",
+              vb + "Neck1": "neck1", vb + "Head1": "head", "ValveBiped.weapon_bone": "weapon_bone"}
+    for side in ("L", "R"):
+        rename.update({
+            vb + f"{side}_Clavicle": f"clavicle_{side}", vb + f"{side}_UpperArm": f"bicep_{side}",
+            vb + f"{side}_Forearm": f"elbow_{side}", vb + f"{side}_Hand": f"wrist_{side}",
+            vb + f"{side}_Ulna": f"lowArm{side}_twist0_0", vb + f"{side}_Thigh": f"thigh_{side}",
+            vb + f"{side}_Calf": f"knee_{side}", vb + f"{side}_Foot": f"ankle_{side}", vb + f"{side}_Toe0": f"toeBase_{side}",
+        })
+        for f in range(5):
+            rename[vb + f"{side}_Finger{f}"] = f"{_P2_FINGERS[f]}_0_{side}"
+            rename[vb + f"{side}_Finger{f}1"] = f"{_P2_FINGERS[f]}_1_{side}"
+            rename[vb + f"{side}_Finger{f}2"] = f"{_P2_FINGERS[f]}_2_{side}"
+    out = []
+    for n, par, p in specs:
+        if n == vb + "Spine2":
+            continue  # Chell has three spine bones
+        if par == vb + "Spine2":
+            par = vb + "Spine1"
+        out.append((rename[n], rename[par] if par else None, p))
+    for side, sy in (("L", 1), ("R", -1)):
+        out += [
+            (f"{side}scapAJNT", f"clavicle_{side}", pos[vb + f"{side}_Clavicle"] + [-1, 0, 0]),
+            (f"{side}upperArmTwistJNT", f"bicep_{side}", (pos[vb + f"{side}_UpperArm"] + pos[vb + f"{side}_Forearm"]) / 2),
+            (f"{side}upperLegTwistJNT", f"thigh_{side}", (pos[vb + f"{side}_Thigh"] + pos[vb + f"{side}_Calf"]) / 2),
+            (f"{side}_spring_joint_0", f"knee_{side}", pos[vb + f"{side}_Calf"] + [1, 0, 0]),
+        ]
+    out += [("baseJackedJNT", "root", pos[vb + "Pelvis"] + [-2, 0, 0]), ("neck_twist", "neck1", pos[vb + "Neck1"] + [0, 0, 1]),
+            ("hair_jiggle_bone_0", "head", pos[vb + "Head1"] + [-3, 0, 4])]
+    return out
+
+
+def chell_world_bones(style: str = "valvebiped", up: str = "z"):
+    """Bone names/parents/world matrices. ``up="y"`` rotates the whole skeleton to Y-up."""
+    specs = _bone_specs_portal2() if style == "portal2" else _bone_specs()
     names = [n for n, _, _ in specs]
     parents = [names.index(p) if p else -1 for _, p, _ in specs]
     children = {i: [j for j, p in enumerate(parents) if p == i] for i in range(len(specs))}
@@ -68,23 +109,27 @@ def chell_world_bones():
         # add some twist so orientations are non-trivial
         rot = rot @ rot_z(0.3) if "Finger" not in n else rot
         worlds.append(make_mat4(rot, pos))
+    if up == "y":
+        g = make_mat4(np.array([[0, 1.0, 0], [0, 0, 1.0], [1.0, 0, 0]]))  # z->y, x->z, y->x
+        worlds = [g @ w for w in worlds]
     return names, parents, worlds
 
 
-def make_chell_mdl() -> bytes:
-    names, parents, worlds = chell_world_bones()
+def make_chell_mdl(style: str = "valvebiped", up: str = "z", with_ik: bool = True,
+                   includes=("models/player/chell/anims.mdl",)) -> bytes:
+    names, parents, worlds = chell_world_bones(style, up)
     nb = len(names)
     header_size = 408
     bone_index = header_size
     bones_end = bone_index + nb * 216
     # ik chains after bones
-    chains = [("lfoot", "L"), ("rfoot", "R"), ("lhand", "L"), ("rhand", "R")]
+    chains = [("lfoot", "L"), ("rfoot", "R"), ("lhand", "L"), ("rhand", "R")] if with_ik else []
     ik_index = bones_end
     ik_size = len(chains) * 16
     link_index = ik_index + ik_size
     links_size = len(chains) * 3 * 28
     inc_index = link_index + links_size
-    str_start = inc_index + 8
+    str_start = inc_index + 8 * len(includes)
     strings = bytearray()
     str_off = {}
 
@@ -104,7 +149,7 @@ def make_chell_mdl() -> bytes:
     struct.pack_into("<ii", data, 156, nb, bone_index)
     struct.pack_into("<i", data, 188, 20)
     struct.pack_into("<ii", data, 284, len(chains), ik_index)
-    struct.pack_into("<ii", data, 336, 1, inc_index)
+    struct.pack_into("<ii", data, 336, len(includes), inc_index)
     for i in range(nb):
         base = bone_index + i * 216
         p = parents[i]
@@ -117,22 +162,25 @@ def make_chell_mdl() -> bytes:
     for ci, (cname, side) in enumerate(chains):
         base = ik_index + ci * 16
         lb = link_index + ci * 3 * 28
-        if "foot" in cname:
+        if style == "portal2":
+            bns = [f"thigh_{side}", f"knee_{side}", f"ankle_{side}"] if "foot" in cname else [f"bicep_{side}", f"elbow_{side}", f"wrist_{side}"]
+        elif "foot" in cname:
             bns = [f"ValveBiped.Bip01_{side}_Thigh", f"ValveBiped.Bip01_{side}_Calf", f"ValveBiped.Bip01_{side}_Foot"]
         else:
             bns = [f"ValveBiped.Bip01_{side}_UpperArm", f"ValveBiped.Bip01_{side}_Forearm", f"ValveBiped.Bip01_{side}_Hand"]
         struct.pack_into("<iiii", data, base, sref(cname) - base, 0, 3, lb - base)
         for j, bn in enumerate(bns):
             struct.pack_into("<i3f3f", data, lb + j * 28, names.index(bn), 0.7 if j == 0 else 0, 0.7 if j == 0 else 0, 0, 0, 0, 0)
-    struct.pack_into("<ii", data, inc_index, 0, sref("models/player/chell/anims.mdl") - inc_index)
+    for k, inc in enumerate(includes):
+        struct.pack_into("<ii", data, inc_index + 8 * k, 0, sref(inc) - (inc_index + 8 * k))
     data += strings
     struct.pack_into("<i", data, 76, len(data))
     return bytes(data)
 
 
-def make_chell_vvd(top: float = 70.0) -> bytes:
+def make_chell_vvd(top: float = 70.0, up: str = "z") -> bytes:
     verts = np.zeros((3, 12), dtype=np.float32)
-    verts[:, 6] = [0.0, 35.0, top]
+    verts[:, 6 if up == "z" else 5] = [0.0, 35.0, top]
     data = bytearray(64)
     struct.pack_into("<4si", data, 0, b"IDSV", 4)
     struct.pack_into("<ii", data, 56, 64, 64 + verts.nbytes)

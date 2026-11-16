@@ -168,3 +168,47 @@ def test_smd_qc_output(tmp_path):
     tri = text.split("triangles\n", 1)[1]
     mats = {ln for ln in tri.splitlines()[::4] if ln != "end"}
     assert mats <= set(vmts)
+
+
+@pytest.mark.parametrize("up", ["z", "y"])
+def test_portal2_chell_skeleton(up, tmp_path):
+    """Chell's real Portal 2 bone names (root/bicep/elbow/wrist/knee/ankle/toeBase + helpers)."""
+    from portal2vroid.mdl import vvd_positions
+
+    chell = parse_mdl(fixtures.make_chell_mdl("portal2", up))
+    verts = vvd_positions(fixtures.make_chell_vvd(70.0, up))
+    vrm = load_vrm(fixtures.make_vrm("1.0"))
+    res = convert(vrm, chell, ConvertOptions(chell_vertices=verts))
+    m = res.mapping
+    assert m["hips"] == "root" and m["spine"] == "spine1" and m["chest"] == "spine2" and m["upperChest"] == "spine3"
+    assert m["neck"] == "neck1" and m["head"] == "head"
+    assert m["leftShoulder"] == "clavicle_L" and m["leftUpperArm"] == "bicep_L"
+    assert m["leftLowerArm"] == "elbow_L" and m["leftHand"] == "wrist_L"
+    assert m["rightUpperLeg"] == "thigh_R" and m["rightLowerLeg"] == "knee_R" and m["rightFoot"] == "ankle_R"
+    assert m["rightToes"] == "toeBase_R"
+    assert m["leftThumbMetacarpal"] == "thumb_0_L" and m["leftMiddleDistal"] == "mid_2_L" and m["leftLittleProximal"] == "pinky_0_L"
+    assert not any("twist" in v.lower() or "jnt" in v.lower() for v in m.values())
+
+    up_v = np.array([0, 0, 1.0]) if up == "z" else np.array([0, 1.0, 0])
+    allp = np.concatenate([mm.positions for mm in res.meshes])
+    h = allp @ up_v
+    assert h.max() == pytest.approx(70.0, abs=0.1) and h.min() == pytest.approx(0.0, abs=0.1)
+    # left hand on Chell's left side
+    names = [b.name for b in res.bones]
+    left_axis = np.array([0, 1.0, 0]) if up == "z" else np.array([1.0, 0, 0])
+    assert res.bones[names.index("wrist_L")].world[:3, 3] @ left_axis > 5
+    # rest orientations still exactly Chell's
+    cw = chell.world_matrices()
+    for i in range(res.n_chell):
+        assert np.allclose(res.bones[i].world[:3, :3], cw[i][:3, :3], atol=1e-9)
+
+
+def test_bad_vvd_height_falls_back_to_skeleton():
+    from portal2vroid.mdl import vvd_positions
+
+    chell = parse_mdl(fixtures.make_chell_mdl("portal2"))
+    bad = vvd_positions(fixtures.make_chell_vvd(13.8))  # what the real game reported
+    res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions(chell_vertices=bad))
+    assert any("looked wrong" in w for w in res.warnings)
+    allp = np.concatenate([mm.positions for mm in res.meshes])
+    assert 65 < allp[:, 2].max() < 80
