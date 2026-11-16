@@ -7,6 +7,15 @@
 // "vroid_session_restore" alias. Startup defaults come from the Portal2VRoid app.
 //=============================================================================
 
+// Portal 2 runs mapspawn.nut twice: in the server VM (full API) and in the client VM
+// (no Entities, no players). The client run happens after a save game is restored,
+// which also wipes the server's scheduled events (our update loop), so use it to ask
+// the server side to (re)start the mod.
+if (!("Entities" in getroottable())) {
+	if ("SendToConsole" in getroottable()) SendToConsole("vroid_kick\n");
+	return;
+}
+
 if ("VRoid_Loaded" in getroottable()) return;
 ::VRoid_Loaded <- true;
 
@@ -198,7 +207,7 @@ if (!("VRoidDefaults" in getroottable()))
 }
 
 //-----------------------------------------------------------------------------
-// state machine (runs every 0.1 s from a logic_timer)
+// state machine (runs every 0.1 s, see VRoid_ChainTick)
 //-----------------------------------------------------------------------------
 ::VRoid_Cheats <- function(on) {
 	if (on) {
@@ -364,6 +373,16 @@ if (!("VRoidDefaults" in getroottable()))
 
 // The loop only uses a delayed input on worldspawn (a map entity that always exists);
 // the mod creates no entities of its own that could end up in save games.
+// Restart the update loop if it is not running (e.g. a save game restore removed it).
+::VRoid_EnsureRunning <- function() {
+	local v = ::VRoid;
+	local now = Time();
+	if (v.ticks == 0 || now < v.lastTick || now - v.lastTick > 0.5) {
+		if (v.ticks > 0) VRoid_Log("update loop was stopped (save game loaded?); restarting");
+		VRoid_StartTimer();
+	}
+}
+
 ::VRoid_StartTimer <- function() {
 	::VRoid.tickId = RandomInt(1, 1000000000);
 	local w = Entities.FindByClassname(null, "worldspawn");
