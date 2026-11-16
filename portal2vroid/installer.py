@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field
 
 from . import __version__
 from .compiler import compile_model
-from .gamefs import MOD_FOLDER, MOD_MARKER, GameFS, dlc_dirs, find_mod_dir
+from .gamefs import MOD_FOLDER, MOD_MARKER, GameFS, dlc_dirs, find_mod_dir, next_free_dlc_dir
 from .materials import write_materials
 from .mdl import parse_mdl, vvd_positions
 from .menu_patch import FLYOUT_RES, build_flyout, patch_ingame_menu, patch_kb_act
@@ -131,20 +131,14 @@ class ModManager:
     # -------------------------------------------------------------- install
     def install(self) -> str:
         """Create or repair the mod folder. Returns its path."""
-        target = os.path.join(self.game_root, MOD_FOLDER)
-        if self.mod_dir is not None and os.path.normcase(os.path.abspath(self.mod_dir)) != os.path.normcase(target):
-            # Older versions used a portal2_dlcN folder, which Portal 2 also mounts as DLC
-            # (so it was loaded twice). Move it to its own folder.
-            old = self.mod_dir
-            self._unhook()
-            if os.path.exists(target):
-                shutil.rmtree(target)
-            shutil.copytree(old, target)
-            self._remove_mod_folder(old)
-            self.log(f"Moved the mod from {os.path.basename(old)} to {MOD_FOLDER}.")
-            self.mod_dir = target
+        # Never edit gameinfo.txt: the first search path listed there becomes the game's
+        # main (MOD / write) folder, which broke startup. Remove the line older versions added.
+        self._unhook_gameinfo()
+        legacy = os.path.join(self.game_root, MOD_FOLDER)
+        if self.mod_dir is not None and os.path.normcase(os.path.abspath(self.mod_dir)) == os.path.normcase(legacy):
+            self.mod_dir = self._migrate_from_legacy_folder(legacy)
         if self.mod_dir is None:
-            self.mod_dir = target
+            self.mod_dir = next_free_dlc_dir(self.game_root)
             os.makedirs(self.mod_dir, exist_ok=True)
             self.log(f"Creating mod folder {self.mod_dir}")
         else:
@@ -193,7 +187,6 @@ class ModManager:
             self.save_settings(Settings())
         else:
             self.regenerate()
-        self._hook_gameinfo()
         self._hook_autoexec()
         self._remove_saved_cfg()
         for line in self.diagnose():
@@ -205,28 +198,58 @@ class ModManager:
     def _gameinfo_path(self) -> str:
         return os.path.join(self.game_root, "portal2", "gameinfo.txt")
 
-    def _hook_gameinfo(self) -> None:
-        """Register the mod folder as the first search path so Portal 2 always loads it.
+    # Files and folders inside the mod folder that belong to the mod.
+    OWN_PATHS = (
+        MOD_MARKER, SETTINGS_FILE, AVATARS_FILE, "pak01_dir.vpk", "_build", "models/vroid",
+        "materials/models/vroid", "scripts/vscripts/mapspawn.nut", "scripts/vscripts/vroid",
+        "scripts/kb_act.lst", "cfg/vroid", "cfg/vroid.cfg", "resource/ui/basemodui",
+    )
 
-        portal2_dlcN folders are normally mounted automatically, but registering the
-        folder in gameinfo.txt makes it independent of that. A backup is kept.
+    def _migrate_from_legacy_folder(self, legacy: str) -> str:
+        """Move the mod out of portal2_vroid (used with the gameinfo.txt line) into portal2_dlcN.
+
+        While that folder was the game's write folder, Portal 2 may have saved games and
+        settings into it: save games are moved back to portal2/SAVE, caches are dropped.
         """
+        target = next_free_dlc_dir(self.game_root)
+        os.makedirs(target, exist_ok=True)
+        for rel in self.OWN_PATHS:
+            src = os.path.join(legacy, *rel.split("/"))
+            dst = os.path.join(target, *rel.split("/"))
+            if os.path.isdir(src):
+                shutil.copytree(src, dst, dirs_exist_ok=True)
+            elif os.path.isfile(src):
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copyfile(src, dst)
+        save_src = os.path.join(legacy, "SAVE")
+        if os.path.isdir(save_src):
+            save_dst = os.path.join(self.game_root, "portal2", "SAVE")
+            moved = 0
+            for dirpath, _, fns in os.walk(save_src):
+                for fn in fns:
+                    s = os.path.join(dirpath, fn)
+                    d = os.path.join(save_dst, os.path.relpath(s, save_src))
+                    if not os.path.exists(d):
+                        os.makedirs(os.path.dirname(d), exist_ok=True)
+                        shutil.copy2(s, d)
+                        moved += 1
+            if moved:
+                self.log(f"Moved {moved} save file(s) back to portal2\\SAVE.")
+        shutil.rmtree(legacy)
+        self.log(f"Moved the mod from {MOD_FOLDER} to {os.path.basename(target)}.")
+        return target
+
+    def _unhook_gameinfo(self) -> None:
         path = self._gameinfo_path()
+        if not os.path.isfile(path):
+            return
         with open(path, encoding="utf-8", errors="replace") as f:
             text = f.read()
-        text = _strip_tagged_lines(text)
-        m = re.search(r"SearchPaths\s*\{[^\n]*\n", text, re.I)
-        if not m:
-            self.log("! gameinfo.txt has no SearchPaths block; relying on the DLC folder only.")
-            return
-        if not os.path.isfile(path + ".vroid_backup"):
-            shutil.copyfile(path, path + ".vroid_backup")
-        folder = os.path.basename(self.mod_dir)
-        line = f"\t\t\tGame\t\t\t\t|gameinfo_path|../{folder} {HOOK_TAG}\n"
-        text = text[: m.end()] + line + text[m.end() :]
-        with open(path, "w", encoding="utf-8", newline="") as f:
-            f.write(text)
-        self.log(f"Registered {folder} in portal2/gameinfo.txt.")
+        new = _strip_tagged_lines(text)
+        if new != text:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(new)
+            self.log("Removed the line older versions added to portal2/gameinfo.txt.")
 
     def _hook_autoexec(self) -> None:
         """Run our boot cfg at game start (keys + console commands work even before a map loads)."""
@@ -291,8 +314,8 @@ class ModManager:
         try:
             with open(self._gameinfo_path(), encoding="utf-8", errors="replace") as f:
                 gi = f.read()
-            check(HOOK_TAG in gi, "registered in portal2/gameinfo.txt" + ("" if HOOK_TAG in gi else
-                  " (missing - Steam 'verify files' removes it; click Install / Repair)"))
+            check(HOOK_TAG not in gi, "portal2/gameinfo.txt is unmodified" + ("" if HOOK_TAG not in gi else
+                  " (an older version's line is still there - click Install / Repair)"))
         except OSError:
             check(False, "cannot read portal2/gameinfo.txt")
         ae = os.path.join(self.game_root, "portal2", "cfg", "autoexec.cfg")

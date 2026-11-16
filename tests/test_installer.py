@@ -69,7 +69,7 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     monkeypatch.setattr(installer, "compile_model", fake_compile)
     m = ModManager(str(game), log=lambda *_: None)
     mod = m.install()
-    assert os.path.basename(mod) == "portal2_vroid"
+    assert os.path.basename(mod) == "portal2_dlc3"
     assert find_mod_dir(str(game)) == mod
 
     mapspawn = open(os.path.join(mod, "scripts/vscripts/mapspawn.nut")).read()
@@ -85,10 +85,7 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     binds = open(os.path.join(mod, "cfg/vroid/vroid_binds.cfg")).read()
     assert 'bind "v" "vroid_tp_toggle"' in binds
 
-    gi = (game / "portal2" / "gameinfo.txt").read_text()
-    assert "\t\t\tGame\t\t\t\t|gameinfo_path|../portal2_vroid // Portal2VRoid\n" in gi
-    assert gi.index("portal2_vroid") < gi.index("|gameinfo_path|.\n")  # first search path
-    assert (game / "portal2" / "gameinfo.txt.vroid_backup").read_text() == GAMEINFO
+    assert (game / "portal2" / "gameinfo.txt").read_text() == GAMEINFO  # never edited
     assert "exec vroid/vroid_boot" in (game / "portal2" / "cfg" / "autoexec.cfg").read_text()
     assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "studiomdl" not in ln]
 
@@ -97,7 +94,6 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     assert fs.read("scripts/vscripts/mapspawn.nut") == b'printl("mapspawn")\n'
     # re-install is idempotent (still one entry, patched from the original)
     m.install()
-    assert (game / "portal2" / "gameinfo.txt").read_text().count("Portal2VRoid") == 1
     menu_text = open(os.path.join(mod, "resource/ui/basemodui/ingamemainmenu.res")).read()
     assert [c.key for c in kv.parse(menu_text).blocks()[0].blocks()].count("BtnVRoid") == 1
 
@@ -140,29 +136,42 @@ def test_install_add_uninstall(game, tmp_path, monkeypatch):
     assert find_mod_dir(str(game)) is None
 
 
-def test_migrates_old_dlc_install(game, monkeypatch):
-    """Older versions installed into portal2_dlc3 (mounted twice: as DLC and via gameinfo)."""
-    old = game / "portal2_dlc3"
-    (old / "models" / "vroid").mkdir(parents=True)
-    (old / "vroid_mod.txt").write_text("old")
-    (old / "models" / "vroid" / "a1_miku.mdl").write_bytes(b"IDST")
-    (old / "vroid_avatars.json").write_text('[{"id": 1, "name": "Miku", "model_id": "a1_miku", "source": "x"}]')
-    (game / "portal2_dlc4").mkdir()  # someone else's DLC folder after ours
+def test_migrates_gameinfo_install(game):
+    """The previous version used portal2_vroid + a gameinfo.txt line, which made Portal 2
+    treat that folder as its main folder (caches, settings and saves went there)."""
+    legacy = game / "portal2_vroid"
+    (legacy / "models" / "vroid").mkdir(parents=True)
+    (legacy / "vroid_mod.txt").write_text("old")
+    (legacy / "models" / "vroid" / "a1_miku.mdl").write_bytes(b"IDST")
+    (legacy / "vroid_avatars.json").write_text('[{"id": 1, "name": "Miku", "model_id": "a1_miku", "source": "x"}]')
+    (legacy / "maps" / "soundcache").mkdir(parents=True)
+    (legacy / "maps" / "soundcache" / "_master.cache").write_bytes(b"junk")
+    (legacy / "cfg").mkdir()
+    (legacy / "cfg" / "config.cfg").write_text("junk")
+    (legacy / "SAVE" / "123").mkdir(parents=True)
+    (legacy / "SAVE" / "123" / "quick.sav").write_bytes(b"save")
     gi = game / "portal2" / "gameinfo.txt"
-    gi.write_text(gi.read_text().replace("SearchPaths\n\t\t{\n", "SearchPaths\n\t\t{\n\t\t\tGame\t|gameinfo_path|../portal2_dlc3 // Portal2VRoid\n"))
+    gi.write_text(gi.read_text().replace("SearchPaths\n\t\t{\n", "SearchPaths\n\t\t{\n\t\t\tGame\t|gameinfo_path|../portal2_vroid // Portal2VRoid\n"))
+    assert "portal2_vroid" in gi.read_text()
 
     m = ModManager(str(game), log=lambda *_: None)
-    assert os.path.basename(m.mod_dir) == "portal2_dlc3"
     mod = m.install()
-    assert os.path.basename(mod) == "portal2_vroid"
-    assert os.path.isfile(game / "portal2_vroid" / "models" / "vroid" / "a1_miku.mdl")
+    assert os.path.basename(mod) == "portal2_dlc3"
+    assert not legacy.exists()
+    assert gi.read_text() == GAMEINFO
+    assert os.path.isfile(game / "portal2_dlc3" / "models" / "vroid" / "a1_miku.mdl")
     assert [a.name for a in m.avatars()] == ["Miku"]
-    assert os.listdir(old) == ["placeholder.txt"]  # keeps portal2_dlc4 mounting
-    text = gi.read_text()
-    assert "portal2_dlc3" not in text and text.count("Portal2VRoid") == 1 and "../portal2_vroid" in text
-    assert find_mod_dir(str(game)) == mod
+    assert (game / "portal2" / "SAVE" / "123" / "quick.sav").read_bytes() == b"save"
+    assert not (game / "portal2_dlc3" / "maps").exists() and not (game / "portal2_dlc3" / "cfg" / "config.cfg").exists()
+    assert not [ln for ln in m.diagnose() if ln.startswith("PROBLEM") and "avatar" not in ln and "model file" not in ln]
+
+
+def test_uninstall_keeps_dlc_numbering(game):
+    m = ModManager(str(game), log=lambda *_: None)
+    mod = m.install()
+    (game / "portal2_dlc4").mkdir()
     m.uninstall()
-    assert not (game / "portal2_vroid").exists() and gi.read_text() == GAMEINFO
+    assert os.path.isdir(mod) and os.listdir(mod) == ["placeholder.txt"]
 
 
 def test_compile_requires_studiomdl(game, tmp_path):

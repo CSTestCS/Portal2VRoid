@@ -12,8 +12,9 @@ Play Portal 2 as your own **VRoid / VRM avatar** instead of Chell, with a
 * Key binding for third person (default **V**), also listed under *Options → Keyboard*.
 * Hair, skirts and other VRM "spring bones" swing via Source jigglebones. A cel-shading
   light ramp gives the avatar an anime look.
-* One `.exe`. It finds Portal 2 through Steam, installs into its own `portal2_vroid` folder. Besides that
-  folder it only adds one line each to `gameinfo.txt` and `autoexec.cfg`, which Uninstall removes.
+* One `.exe`. It finds Portal 2 through Steam, installs into a `portal2_dlcN` folder (which Portal 2 loads
+  automatically), and adds one line to `autoexec.cfg`, which Uninstall removes. It never
+  edits `gameinfo.txt`.
 
 ## Install
 
@@ -25,7 +26,7 @@ Play Portal 2 as your own **VRoid / VRM avatar** instead of Chell, with a
    The first avatar you add becomes the startup avatar.
 5. Start Portal 2 and load any single-player chapter or save.
 
-To uninstall, click **Uninstall** in the app (or delete the `portal2_vroid` folder that holds
+To uninstall, click **Uninstall** in the app (or delete the `portal2_dlcN` folder that holds
 `vroid_mod.txt`).
 
 ## In game
@@ -71,9 +72,7 @@ Click **Save settings**, then restart Portal 2.
 ## Troubleshooting
 
 1. In the app, click **Check installation**. Every line should say `OK`. If any says
-   `PROBLEM`, click **Install / Repair** and check again. Steam's "Verify integrity of game
-   files" removes the mod's line from `portal2/gameinfo.txt`, so run **Install / Repair**
-   again after verifying.
+   `PROBLEM`, click **Install / Repair** and check again.
 2. Restart Portal 2 completely after installing or adding avatars.
 3. In a single-player map, open the console (enable it under *Options → Keyboard →
    Advanced*) and type `vroid_status`. Lines starting with `[VRoid]` show which avatar is
@@ -81,16 +80,17 @@ Click **Save settings**, then restart Portal 2.
    If `vroid_status` is an unknown command, the mod folder isn't being loaded (see step 1).
    `exec vroid` starts the mod by hand on the current map.
 4. The app keeps a full log at `%LOCALAPPDATA%\Portal2VRoid\Portal2VRoid.log`. If a
-   conversion fails, studiomdl's output is in `portal2_vroid\_build\<avatar>\studiomdl.log`.
+   conversion fails, studiomdl's output is in `portal2_dlcN\_build\<avatar>\studiomdl.log`.
 
-The installer changes two of Portal 2's own files, and **Uninstall** puts both back:
-`portal2/gameinfo.txt` (one search-path line, backup kept as `gameinfo.txt.vroid_backup`) and
-`portal2/cfg/autoexec.cfg` (one `exec` line, so keys work from game start).
+The installer changes one of Portal 2's own files, and **Uninstall** puts it back:
+`portal2/cfg/autoexec.cfg` (one `exec` line, so keys work from game start). Versions before
+1.0.1 also added a line to `portal2/gameinfo.txt`, which broke startup; **Install / Repair**
+removes it.
 
 ## How it works
 
 ```
-your.vrm ──► Portal2VRoid.exe ──► portal2_vroid/
+your.vrm ──► Portal2VRoid.exe ──► portal2_dlcN/
                │  read Chell's skeleton from the game's VPK
                │  place + scale avatar, repose T-pose → Chell's rest pose
                │  build skeleton: Chell's bone names & orientations, avatar's joint positions

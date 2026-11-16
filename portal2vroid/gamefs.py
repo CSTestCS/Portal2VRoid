@@ -10,7 +10,7 @@ from .vpk import VPK
 
 PORTAL2_APPID = "620"
 MOD_MARKER = "vroid_mod.txt"
-MOD_FOLDER = "portal2_vroid"  # loaded through a gameinfo.txt search path, not as DLC
+MOD_FOLDER = "portal2_vroid"  # legacy location (used with a gameinfo.txt line); migrated away
 
 
 def _steam_roots() -> list[str]:
