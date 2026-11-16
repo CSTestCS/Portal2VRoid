@@ -50,6 +50,13 @@ def compile_model(
         shutil.copytree(src_mat, tmp_mat)
         copied_mats = True
 
+    # studiomdl does not create missing folders: make sure its output folder exists.
+    staging = os.path.join(game_dir, "models", "vroid")
+    try:
+        os.makedirs(staging, exist_ok=True)
+    except OSError as e:
+        raise CompileError(f"Cannot create {staging}: {e}. Check the Portal 2 folder is not read-only.") from e
+
     cmd = [exe, "-game", game_dir, "-nop4", "-nox360", "-verbose", qc_path]
     if not sys.platform.startswith("win") and exe.lower().endswith(".exe"):
         raise CompileError("studiomdl.exe can only be run on Windows.")

@@ -198,3 +198,40 @@ def test_qc_includes_chell_animation_models(tmp_path, monkeypatch):
     assert '$includemodel "player/chell/player.mdl"' in qc
     assert '$includemodel "player/chell/player_animations.mdl"' in qc
     assert '$ikchain "lfoot" "ankle_L"' in qc
+
+
+FAKE_STUDIOMDL = r"""#!/bin/sh
+# Mimics Portal 2's studiomdl: writes <game>/models/<modelname> but never creates folders.
+game="$2"
+qc="$6"
+name=$(sed -n 's/^\$modelname "\(.*\)"/\1/p' "$qc")
+out="$game/models/$name"
+if [ ! -d "$(dirname "$out")" ]; then
+  echo "Error opening $game\\models/$name! (Check for write enable)"
+  exit 1
+fi
+for ext in mdl vvd dx90.vtx; do printf 'IDST' > "${out%.mdl}.$ext"; done
+echo "Completed \"$qc\""
+"""
+
+
+def test_real_compile_path_creates_output_folder(game, tmp_path):
+    import stat
+    import sys
+
+    if sys.platform.startswith("win"):
+        pytest.skip("shell-script stand-in for studiomdl")
+    (game / "bin" / "studiomdl.exe").unlink()
+    fake = game / "bin" / "studiomdl"
+    fake.write_text(FAKE_STUDIOMDL)
+    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
+    m = ModManager(str(game), log=lambda *_: None)
+    m.install()
+    vrm_path = tmp_path / "miku.vrm"
+    vrm_path.write_bytes(fixtures.make_vrm("1.0"))
+    av = m.add_avatar(str(vrm_path))
+    mdir = os.path.join(m.mod_dir, "models", "vroid")
+    assert sorted(os.listdir(mdir)) == [f"{av.model_id}.dx90.vtx", f"{av.model_id}.mdl", f"{av.model_id}.vvd"]
+    # nothing left behind in Valve's folder
+    assert not os.path.exists(game / "portal2" / "models" / "vroid")
+    assert not os.path.exists(game / "portal2" / "materials" / "models" / "vroid")
