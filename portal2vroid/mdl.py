@@ -226,3 +226,26 @@ def vvd_positions(data: bytes) -> np.ndarray | None:
         return pos[np.all(np.isfinite(pos), axis=1)]
     except (struct.error, ValueError):
         return None
+
+
+def vvd_skin(data: bytes):
+    """(positions (N,3), bones (N,3) int, weights (N,3)) from a .vvd file, or None.
+
+    Bone indices refer to the model's bone table.
+    """
+    try:
+        if data[:4] != b"IDSV":
+            return None
+        vstart, tstart = struct.unpack_from("<ii", data, 56)
+        count = (tstart - vstart) // 48 if tstart > vstart else (len(data) - vstart) // 48
+        if count <= 0:
+            return None
+        rec = np.dtype([("w", "<f4", 3), ("b", "u1", 3), ("n", "u1"), ("p", "<f4", 3), ("nrm", "<f4", 3), ("uv", "<f4", 2)])
+        v = np.frombuffer(data, dtype=rec, count=count, offset=vstart)
+        n = v["n"].astype(int)
+        w = v["w"].astype(float).copy()
+        for k in range(3):
+            w[n <= k, k] = 0.0
+        return v["p"].astype(float), v["b"].astype(int), w
+    except (struct.error, ValueError):
+        return None

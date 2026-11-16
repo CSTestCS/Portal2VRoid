@@ -223,3 +223,42 @@ def test_no_bbox_when_chell_has_none(tmp_path):
     res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions())
     qc = open(write_model_sources(str(tmp_path), "t", res, chell, ["a", "b"])).read()
     assert "$bbox" not in qc and "$cbox" not in qc
+
+
+def test_twist_helpers_get_weights_like_chell():
+    """Chell's forearm skin blends from the elbow bone to a twist bone towards the wrist;
+    the avatar's forearm must be split the same way (otherwise it candy-wraps)."""
+    chell = parse_mdl(fixtures.make_chell_mdl("portal2"))
+    names = [b.name for b in chell.bones]
+    cw = chell.world_matrices()
+    el, wr, tw = names.index("elbow_L"), names.index("wrist_L"), names.index("lowArmL_twist0_0")
+    t = np.linspace(0, 1, 50)
+    pos = cw[el][:3, 3] + np.outer(t, cw[wr][:3, 3] - cw[el][:3, 3])
+    bones = np.zeros((50, 3), dtype=int)
+    weights = np.zeros((50, 3))
+    bones[:, 0], bones[:, 1] = el, tw
+    weights[:, 0], weights[:, 1] = 1 - t, t  # elbow near the elbow, twist bone near the wrist
+    res = convert(load_vrm(fixtures.make_vrm("1.0")), chell, ConvertOptions(chell_skin=(pos, bones, weights)))
+    assert any("lowArmL_twist0_0" in w for w in res.warnings)
+    # the twist helper sits on the avatar's own forearm (between its elbow and wrist)
+    out = {b.name: b for b in res.bones}
+    e, w_, h = (out[n].world[:3, 3] for n in ("elbow_L", "wrist_L", "lowArmL_twist0_0"))
+    seg = w_ - e
+    th = np.dot(h - e, seg) / np.dot(seg, seg)
+    assert 0.2 < th < 0.8 and np.linalg.norm((h - e) - th * seg) < 0.5
+    # forearm vertices near the wrist now follow the twist bone, near the elbow the elbow bone
+    found_near_wrist = found_near_elbow = False
+    for m in res.meshes:
+        for p, bb, ww in zip(m.positions, m.bones, m.weights):
+            tt = np.dot(p - e, seg) / np.dot(seg, seg)
+            d = np.linalg.norm((p - e) - tt * seg)
+            if d > 3 or not (0 <= tt <= 1):
+                continue
+            share = {res.bones[b].name: x for b, x in zip(bb, ww)}
+            if tt > 0.85 and share.get("lowArmL_twist0_0", 0) > 0.6:
+                found_near_wrist = True
+            if tt < 0.15 and share.get("elbow_L", 0) > 0.6:
+                found_near_elbow = True
+    assert found_near_wrist and found_near_elbow
+    for m in res.meshes:
+        assert np.allclose(m.weights.sum(axis=1), 1.0)

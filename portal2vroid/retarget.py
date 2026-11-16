@@ -76,6 +76,7 @@ class ConvertOptions:
     max_bones: int = MAX_BONES
     chell_height: float | None = None  # legacy: top-of-mesh height when Chell's model is Z-up
     chell_vertices: np.ndarray | None = None  # Chell's mesh vertex positions (from player.vvd), if available
+    chell_skin: tuple | None = None  # (positions, bones, weights) of Chell's mesh, for twist-bone weights
 
 
 def _sanitize_bone_name(name: str, idx: int, taken: set[str]) -> str:
@@ -307,7 +308,18 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
         else:
             anc, desc = mapped_ancestor(i), nearest_mapped_descendant(i)
             par = c_parents[i]
-            if anc is not None and desc is not None:
+            par_child = _mapped_child_of(par, c_children, node_of_chell) if 0 <= par < n_chell and par in node_of_chell else None
+            if desc is None and par_child is not None and out_world[par] is not None:
+                # Helper bone hanging off a mapped limb bone (e.g. a twist joint): keep its
+                # relative place along the limb, scaled to the avatar's limb length.
+                seg_c = c_pos[par_child] - c_pos[par]
+                L2 = float(np.dot(seg_c, seg_c))
+                rel = c_pos[i] - c_pos[par]
+                t = float(np.dot(rel, seg_c) / L2) if L2 > 1e-9 else 0.0
+                perp = rel - t * seg_c
+                seg_o = new_pos[node_of_chell[par_child]] - out_world[par][:3, 3]
+                pos = out_world[par][:3, 3] + t * seg_o + perp
+            elif anc is not None and desc is not None:
                 a, d = c_pos[anc], c_pos[desc]
                 la, ld = np.linalg.norm(c_pos[i] - a), np.linalg.norm(d - c_pos[i])
                 t = la / (la + ld) if la + ld > 1e-6 else 0.5
@@ -408,6 +420,7 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
 
     resolve_cache: dict[int, int] = {}
     meshes: list[OutMesh] = []
+    twist_profiles = _twist_profiles(opts.chell_skin, c_pos, c_children, node_of_chell, c_names, warnings)
     for pi, prim in enumerate(vrm.primitives):
         pos, nrm = posed[pi]
 
@@ -436,6 +449,8 @@ def convert(vrm: VRMModel, chell: MDLSkeleton, opts: ConvertOptions | None = Non
         top_b[zero, 0] = root_fallback
         s[zero] = 1.0
         top_w = top_w / s
+        if twist_profiles:
+            top_b, top_w = _apply_twist_profiles(pos, top_b, top_w, twist_profiles, bones)
         meshes.append(OutMesh(prim.mesh_name, prim.material, pos, nrm, prim.uvs.copy(), top_b, top_w, prim.indices.copy()))
 
     return ConversionResult(
@@ -456,3 +471,108 @@ def _chain_depth(parents: list[int], i: int) -> int:
         d += 1
         p = parents[p]
     return d
+
+
+def _mapped_child_of(i, c_children, node_of_chell):
+    kids = [k for k in c_children[i] if k in node_of_chell]
+    return kids[0] if kids else None
+
+
+TWIST_BINS = 12
+
+
+def _twist_profiles(chell_skin, c_pos, c_children, node_of_chell, c_names, warnings):
+    """How Chell's own skin is shared between a limb bone and its twist helper bones.
+
+    Returns {limb bone: (child bone, [family bones], shares[TWIST_BINS, len(family)])}
+    where shares are measured along the limb (0 = limb bone joint, 1 = child joint).
+    """
+    if chell_skin is None:
+        return {}
+    pos, bones, weights = chell_skin
+    out = {}
+    for b, kids in enumerate(c_children):
+        if b not in node_of_chell:
+            continue
+        child = _mapped_child_of(b, c_children, node_of_chell)
+        helpers = [k for k in kids if k not in node_of_chell and not c_children[k]]
+        if child is None or not helpers:
+            continue
+        fam = [b] + helpers
+        famw = np.zeros((len(pos), len(fam)))
+        for j, fb in enumerate(fam):
+            famw[:, j] = (weights * (bones == fb)).sum(axis=1)
+        tot = famw.sum(axis=1)
+        sel = tot > 0.05
+        if not np.any(famw[sel][:, 1:].sum(axis=1) > 0.05):
+            continue  # helpers carry no skin: nothing to copy
+        seg = c_pos[child] - c_pos[b]
+        L2 = float(np.dot(seg, seg))
+        if L2 < 1e-9:
+            continue
+        t = np.clip((pos[sel] - c_pos[b]) @ seg / L2, 0.0, 0.999)
+        bins = (t * TWIST_BINS).astype(int)
+        share = np.zeros((TWIST_BINS, len(fam)))
+        for k in range(TWIST_BINS):
+            m = bins == k
+            if m.any():
+                fw = famw[sel][m]
+                share[k] = fw.sum(axis=0) / max(fw.sum(), 1e-9)
+        # fill empty bins from the nearest filled one
+        filled = [k for k in range(TWIST_BINS) if share[k].sum() > 0]
+        if not filled:
+            continue
+        for k in range(TWIST_BINS):
+            if share[k].sum() == 0:
+                share[k] = share[min(filled, key=lambda f: abs(f - k))]
+        out[b] = (child, fam, share)
+    if out:
+        warnings.append("Twist bones copied from Chell: " + ", ".join(
+            f"{c_names[b]}+{'/'.join(c_names[h] for h in fam[1:])}" for b, (_, fam, _) in out.items()))
+    return out
+
+
+def _apply_twist_profiles(pos, top_b, top_w, profiles, bones):
+    """Split weights on limb bones between the limb bone and its twist helpers like Chell's skin."""
+    n = len(pos)
+    extra_b = [top_b[:, k] for k in range(top_b.shape[1])]
+    extra_w = [top_w[:, k] for k in range(top_w.shape[1])]
+    cols_b, cols_w = [], []
+    for k in range(top_b.shape[1]):
+        bk, wk = top_b[:, k].copy(), top_w[:, k].copy()
+        for limb, (child, fam, share) in profiles.items():
+            m = (bk == limb) & (wk > 0)
+            if not m.any():
+                continue
+            p0 = bones[limb].world[:3, 3]
+            seg = bones[child].world[:3, 3] - p0
+            L2 = float(np.dot(seg, seg))
+            if L2 < 1e-9:
+                continue
+            t = np.clip((pos[m] - p0) @ seg / L2, 0.0, 0.999)
+            sh = share[(t * TWIST_BINS).astype(int)]  # (m, len(fam))
+            base_w = wk[m].copy()
+            wk[m] = base_w * sh[:, 0]
+            for j, fb in enumerate(fam[1:], start=1):
+                nb = np.full(n, fb)
+                nw = np.zeros(n)
+                nw[m] = base_w * sh[:, j]
+                cols_b.append(nb)
+                cols_w.append(nw)
+        extra_b[k], extra_w[k] = bk, wk
+    if not cols_b:
+        return top_b, top_w
+    allb = np.stack(extra_b + cols_b, axis=1)
+    allw = np.stack(extra_w + cols_w, axis=1)
+    # merge duplicates, keep the strongest three, renormalize
+    for a in range(allb.shape[1]):
+        for c in range(a + 1, allb.shape[1]):
+            same = (allb[:, a] == allb[:, c]) & (allw[:, c] > 0)
+            allw[same, a] += allw[same, c]
+            allw[same, c] = 0.0
+    order = np.argsort(-allw, axis=1)[:, :MAX_WEIGHTS]
+    nb = np.take_along_axis(allb, order, axis=1)
+    nw = np.take_along_axis(allw, order, axis=1)
+    s = nw.sum(axis=1, keepdims=True)
+    s[s <= 1e-8] = 1.0
+    return nb, nw / s

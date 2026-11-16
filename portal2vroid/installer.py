@@ -13,7 +13,7 @@ from . import __version__
 from .compiler import compile_model
 from .gamefs import MOD_FOLDER, MOD_MARKER, GameFS, dlc_dirs, find_mod_dir, next_free_dlc_dir
 from .materials import write_materials
-from .mdl import parse_mdl, vvd_positions
+from .mdl import parse_mdl, vvd_positions, vvd_skin
 from .menu_patch import FLYOUT_RES, build_flyout, patch_ingame_menu, patch_kb_act
 from .retarget import ConvertOptions, convert
 from .source_export import write_model_sources
@@ -508,6 +508,7 @@ class ModManager:
         skel = parse_mdl(data)
         vvd = fs.read(path[:-4] + ".vvd")
         verts = vvd_positions(vvd) if vvd else None
+        self._chell_skin = vvd_skin(vvd) if vvd else None
         # Chell's animations live in included models (e.g. player_animations.mdl). Their
         # IK chains must be declared on our model too, so read them if player.mdl has none.
         for inc in skel.include_models:
@@ -568,7 +569,8 @@ class ModManager:
         result = convert(
             vrm,
             chell,
-            ConvertOptions(height_scale=height_scale, jiggle=s.jiggle_bones, chell_vertices=chell_verts),
+            ConvertOptions(height_scale=height_scale, jiggle=s.jiggle_bones, chell_vertices=chell_verts,
+                           chell_skin=getattr(self, "_chell_skin", None)),
         )
         log("  bone mapping: " + ", ".join(f"{k}={v}" for k, v in result.mapping.items()))
         for w in result.warnings:
