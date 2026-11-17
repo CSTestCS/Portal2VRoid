@@ -134,8 +134,7 @@ def _read_smd_skeleton(path):
         if parents[i] >= 0:
             worlds.append(worlds[parents[i]] @ local)
         else:
-            # undo studiomdl's default +90 deg Z rotation pre-compensation
-            worlds.append(make_mat4(rot_z(np.pi / 2)) @ local)
+            worlds.append(local)  # SMD space is the model space (no rotation)
     return names, parents, worlds, text
 
 
@@ -150,7 +149,7 @@ def test_smd_qc_output(tmp_path):
     qtext = open(qc).read()
     assert '$includemodel "player/chell/player.mdl"' in qtext
     assert '$sequence "vroid_proportions" "a_vroid_proportions" predelta autoplay' in qtext
-    assert '$ikchain "lfoot" "ValveBiped.Bip01_L_Foot"\n' in qtext and " knee " not in qtext
+    assert "$ikchain" not in qtext  # studiomdl flips -X chain bones; see source_export
     assert '$jigglebone "vrm_J_Hair1"' in qtext
 
     bodies = re.findall(r'\$body "[^"]+" "([^"]+)"', qtext)

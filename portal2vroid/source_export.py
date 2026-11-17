@@ -6,15 +6,13 @@ import os
 
 import numpy as np
 
-from .mathutil import mat3_to_euler, rigid_inverse, rot_z
+from .mathutil import mat3_to_euler, rigid_inverse
 from .mdl import MDLSkeleton
 from .retarget import ConversionResult
 
-# studiomdl rotates every model by +90 degrees around Z by default
-# (g_defaultrotation). Pre-rotate by -90 so the compiled model ends up in exactly
-# the same space as Chell's bones.
+# Portal 2's studiomdl keeps SMD coordinates as they are (verified on a compiled
+# model: no default rotation is applied), so SMD space == Chell's model space.
 SMD_FROM_GAME = np.eye(4)
-SMD_FROM_GAME[:3, :3] = rot_z(-np.pi / 2)
 
 MAX_TRIS_PER_SMD = 20000
 
@@ -173,12 +171,10 @@ def write_model_sources(
     q += [
         "",
     ]
-    for ch in chell.ikchains:
-        if ch.links:
-            end = chell.bones[ch.links[-1]].name
-            # No "knee": the MDL stores knee directions in the thigh's local space while
-            # QC expects model space. Without it, the IK solver bends along the current pose.
-            q.append(f'$ikchain "{ch.name}" "{end}"')
+    # No $ikchain: studiomdl rewrites the frames of IK-chain bones that point along -X
+    # (Chell's right arm and leg) by 180 degrees, which made her animations twist the
+    # avatar's right arm and leg. Without chains the engine skips IK, and Chell's
+    # animations already place hands and feet.
     jig = [b for b in result.bones if b.jiggle_length > 0.05]
     for b in jig:
         q += [

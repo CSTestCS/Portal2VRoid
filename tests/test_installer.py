@@ -232,7 +232,7 @@ def test_qc_includes_chell_animation_models(tmp_path, monkeypatch):
     qc = captured["qc"]
     assert '$includemodel "player/chell/player.mdl"' in qc
     assert '$includemodel "player/chell/player_animations.mdl"' in qc
-    assert '$ikchain "lfoot" "ankle_L"' in qc
+    assert "$ikchain" not in qc
 
 
 FAKE_STUDIOMDL = r"""#!/bin/sh

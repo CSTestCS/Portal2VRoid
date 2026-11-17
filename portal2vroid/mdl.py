@@ -106,6 +106,8 @@ def _vec(data: bytes, off: int) -> np.ndarray:
 def parse_mdl(data: bytes) -> MDLSkeleton:
     if data[:4] != b"IDST":
         raise ValueError("not a Source model (missing IDST header)")
+    if len(data) < 408:
+        raise ValueError("truncated model file")
     version = struct.unpack_from("<i", data, 4)[0]
     if version < 44 or version > 53:
         raise ValueError(f"unsupported MDL version {version}")

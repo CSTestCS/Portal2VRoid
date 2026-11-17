@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+
+import numpy as np
 import os
 import re
 import shutil
@@ -585,6 +587,7 @@ class ModManager:
             extra = [i[len("models/"):] if i.lower().startswith("models/") else i for i in chell.include_models]
             qc = write_model_sources(build_dir, model_id, result, chell, vmts, [include] + extra)
             compile_model(self.game_root, qc, model_id, self.mod_dir, log=log, studiomdl=s.studiomdl_path or None)
+            self._verify_compiled(model_id, result)
         except Exception:
             self._remove_model_files(model_id)
             raise
@@ -600,6 +603,31 @@ class ModManager:
             self.regenerate()
         log(f"Added avatar '{display}' (id {new_id}).")
         return av
+
+    def _verify_compiled(self, model_id: str, result) -> list[str]:
+        """Read the compiled model back and report bones studiomdl changed."""
+        path = self._path("models", "vroid", model_id + ".mdl")
+        try:
+            with open(path, "rb") as f:
+                comp = parse_mdl(f.read())
+        except (OSError, ValueError) as e:
+            self.log(f"  ! could not read back the compiled model: {e}")
+            return []
+        want = {b.name: b.world for b in result.bones}
+        bad = []
+        for b, w in zip(comp.bones, comp.world_matrices()):
+            if b.name not in want:
+                continue
+            r = want[b.name][:3, :3].T @ w[:3, :3]
+            ang = float(np.degrees(np.arccos(np.clip((np.trace(r) - 1) / 2, -1, 1))))
+            dist = float(np.linalg.norm(want[b.name][:3, 3] - w[:3, 3]))
+            if ang > 1.0 or dist > 0.1:
+                bad.append(f"{b.name} ({ang:.0f} deg, {dist:.1f} units)")
+        if bad:
+            self.log("  ! PROBLEM: studiomdl changed these bones, the avatar will look warped: " + ", ".join(bad))
+        else:
+            self.log(f"  Compiled model checked: all {len(comp.bones)} bones are where they should be.")
+        return bad
 
     def export_debug(self, zip_path: str, log_file: str | None = None) -> str:
         """Zip Chell's model files, the mod settings and the generated model sources."""
