@@ -60,6 +60,9 @@ if (!("VRoidDefaults" in getroottable()))
 //-----------------------------------------------------------------------------
 ::VRoid_Log <- function(msg) { printl("[VRoid] " + msg); }
 
+// Maps whose scenery breaks with a third-person camera: start them in first person.
+::VRoid_FirstPersonMaps <- { sp_a1_intro1 = true };
+
 // Every console command is newline-terminated so consecutive commands never run together.
 ::VRoid_Cmd <- function(cmd) { SendToConsole(cmd + "\n"); }
 
@@ -146,9 +149,26 @@ if (!("VRoidDefaults" in getroottable()))
 	VRoid_SelectAvatarId(ids[idx]);
 }
 
+// Apply the camera right away (does not wait for the update loop).
+::VRoid_ApplyCamera <- function() {
+	local v = ::VRoid;
+	if (v.tp) {
+		VRoid_Cmd("sv_cheats 1");
+		v.cheatsByUs = true;
+		VRoid_Cmd("cam_collision 1; cam_snapto 1; cam_idealyaw 0; cam_idealpitch 0");
+		VRoid_Cmd("cam_idealdist " + v.dist + "; cam_idealdistup " + v.up + "; cam_idealdistright " + v.right);
+		VRoid_Cmd("thirdperson");
+	} else {
+		VRoid_Cmd("firstperson");
+		if (v.cheatsByUs) VRoid_Cheats(false);
+	}
+	v.tpApplied = v.tp;
+	v.camDirty = false;
+}
+
 ::VRoid_SetThirdPerson <- function(on) {
 	::VRoid.tp = on ? 1 : 0;
-	::VRoid.camDirty = true;
+	VRoid_ApplyCamera();
 	VRoid_SaveSession();
 	VRoid_Notify(on ? "Third-person camera ON" : "Third-person camera OFF");
 }
@@ -164,8 +184,8 @@ if (!("VRoidDefaults" in getroottable()))
 	if (which == 0) v.dist = VRoid_Clamp(v.dist + dir * d.step_dist, 20, 400);
 	else if (which == 1) v.up = VRoid_Clamp(v.up + dir * d.step_up, -64, 96);
 	else v.right = VRoid_Clamp(v.right + dir * d.step_right, -96, 96);
-	v.camDirty = true;
 	if (v.tp == 0) v.tp = 1; // show the change
+	VRoid_ApplyCamera();
 	VRoid_SaveSession();
 	VRoid_Notify("Camera  distance " + v.dist + "   height " + v.up + "   side " + v.right);
 }
@@ -175,7 +195,7 @@ if (!("VRoidDefaults" in getroottable()))
 	v.dist = ::VRoidDefaults.dist;
 	v.up = ::VRoidDefaults.up;
 	v.right = ::VRoidDefaults.right;
-	v.camDirty = true;
+	if (v.tp) VRoid_ApplyCamera();
 	VRoid_SaveSession();
 	VRoid_Notify("Camera reset");
 }
@@ -341,6 +361,12 @@ if (!("VRoidDefaults" in getroottable()))
 			// First map since the game started: installer defaults apply.
 			v.restored = true;
 			VRoid_SaveSession();
+		}
+		if (v.tp && (GetMapName().tolower() in ::VRoid_FirstPersonMaps)) {
+			// The scenery here is drawn through hidden portals that only look right from
+			// the player's eyes, so a third-person camera shows the bare room instead.
+			v.tp = 0;
+			VRoid_Log("this map's scenery only works in first person; press V for third person anyway");
 		}
 		VRoid_Log("active: avatar=" + VRoid_AvatarName(v.avatar) + ", third person=" + (v.tp ? "on" : "off"));
 		v.wait = 3;

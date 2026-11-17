@@ -15,6 +15,7 @@ from .retarget import ConversionResult
 SMD_FROM_GAME = np.eye(4)
 
 MAX_TRIS_PER_SMD = 20000
+KEEP_BONES = ("weapon_bone", "valvebiped.weapon_bone")
 
 
 def _fmt(v: float) -> str:
@@ -175,6 +176,13 @@ def write_model_sources(
     # (Chell's right arm and leg) by 180 degrees, which made her animations twist the
     # avatar's right arm and leg. Without chains the engine skips IK, and Chell's
     # animations already place hands and feet.
+
+    # Keep the bones other entities attach to by name (the portal gun bone-merges onto
+    # Chell's weapon_bone). studiomdl drops bones no vertex uses; an attachment keeps them.
+    names = {b.name.lower(): b.name for b in result.bones[: result.n_chell]}
+    for key in KEEP_BONES:
+        if key in names:
+            q.append(f'$attachment "vroid_keep_{key}" "{names[key]}" 0 0 0 rotate 0 0 0')
     jig = [b for b in result.bones if b.jiggle_length > 0.05]
     for b in jig:
         q += [

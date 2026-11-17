@@ -233,6 +233,7 @@ def test_qc_includes_chell_animation_models(tmp_path, monkeypatch):
     assert '$includemodel "player/chell/player.mdl"' in qc
     assert '$includemodel "player/chell/player_animations.mdl"' in qc
     assert "$ikchain" not in qc
+    assert '$attachment "vroid_keep_weapon_bone" "weapon_bone" 0 0 0' in qc
 
 
 FAKE_STUDIOMDL = r"""#!/bin/sh

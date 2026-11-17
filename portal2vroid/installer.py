@@ -623,6 +623,10 @@ class ModManager:
             dist = float(np.linalg.norm(want[b.name][:3, 3] - w[:3, 3]))
             if ang > 1.0 or dist > 0.1:
                 bad.append(f"{b.name} ({ang:.0f} deg, {dist:.1f} units)")
+        have = {b.name.lower() for b in comp.bones}
+        if "weapon_bone" in want or "weapon_bone" in {n.lower() for n in want}:
+            if "weapon_bone" not in have:
+                bad.append("weapon_bone missing (the portal gun will float)")
         if bad:
             self.log("  ! PROBLEM: studiomdl changed these bones, the avatar will look warped: " + ", ".join(bad))
         else:
